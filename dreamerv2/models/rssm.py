@@ -1,10 +1,14 @@
 import torch
 
-from Dreamer-v2.models import LinearEncoder,LinearDecoder,RewardModel,RecurrentDynamics,ActionModel,ValueModel
+from dreamerv2.models import LinearEncoder, LinearDecoder, RewardModel, RecurrentDynamics, ActionModel, ValueModel
+#from encoder import LinearEncoder
+#from decoder import LinearDecoder, RewardModel, ActionModel, ValueModel
+#from dynamics import RecurrentDynamics
 
 class RSSModel(object):
     
     def __init__(self, obs_size, action_size, hidden_size, state_size, embedding_size, node_size, device="cpu"):
+        
         self.obs_size = obs_size
         self.action_size = action_size
         self.hidden_size = hidden_size
@@ -16,7 +20,7 @@ class RSSModel(object):
         self.encoder = LinearEncoder(obs_size, embedding_size, node_size).to(device)
         self.decoder = LinearDecoder(obs_size, hidden_size, state_size, node_size).to(device)
         self.reward_model = RewardModel(hidden_size, state_size, node_size).to(device)
-        self.dynaics = RecurrentDynamics(hidden_size, state_size, action_size, node_size, embedding_size).to(device)
+        self.dynamics = RecurrentDynamics(hidden_size, state_size, action_size, node_size, embedding_size).to(device)
 
     def parameters(self):
         return (
@@ -96,15 +100,18 @@ class RSSModel(object):
         }
 
     def load_state_dict(self, model_dict):
+
         self.dynamics.load_state_dict(model_dict["dynamics"])
         self.encoder.load_state_dict(model_dict["encoder"])
         self.decoder.load_state_dict(model_dict["decoder"])
         self.reward_model.load_state_dict(model_dict["reward_model"])
 
     def _bottle(self, f, x_tuple):
+
         """ 
-        loops over the first dims of x [seq_len] and applies f 
+        loops over the first dims of x (seq_len) and applies f 
         Wraps the input tuple for a function to process a time x batch x features sequence in batch x features (assumes one output)
+        Instead of this (I think), we can reshape?
         """
         x_sizes = tuple(map(lambda x: x.size(), x_tuple))
         y = f(
