@@ -1,123 +1,140 @@
 import torch
 
-from dreamerv2.models import LinearEncoder, LinearDecoder, RewardModel, RecurrentDynamics, ActionModel, ValueModel
-#from encoder import LinearEncoder
-#from decoder import LinearDecoder, RewardModel, ActionModel, ValueModel
-#from dynamics import RecurrentDynamics
+from dreamerv2.models import LinearEncoder, LinearDecoder, RewardModel, ActionModel, ValueModel
 
-class RSSModel(object):
+
+class RSSM(nn.Module):
     
-    def __init__(self, obs_size, action_size, hidden_size, state_size, embedding_size, node_size, device="cpu"):
-        
-        self.obs_size = obs_size
+    def __init__(self, action_size, deter_size, stoch_size, node_size, embedding_size, discrete="False", 
+                act_fn=nn.ELU, device="cpu", min_std=0.1, num_classes=32):
+        super().__init__()
+        """
+        :params discrete : latent space representation 
+        :params deter_size : size of deterministic recurrent states
+        :params stoch_size : size of stochastic states
+        :params node_size : size of fc hidden layers of al NNs
+        :params embedding_size : size of embedding of observation decoder
+        """
+        self.act_fn = act_fn
         self.action_size = action_size
-        self.hidden_size = hidden_size
-        self.state_size = state_size
-        self.embedding_size = embedding_size
+        self.deter_size = deter_size
+        self.stoch_size = stoch_size
         self.node_size = node_size
         self.device = device
-
-        self.encoder = LinearEncoder(obs_size, embedding_size, node_size).to(device)
-        self.decoder = LinearDecoder(obs_size, hidden_size, state_size, node_size).to(device)
-        self.reward_model = RewardModel(hidden_size, state_size, node_size).to(device)
-        self.dynamics = RecurrentDynamics(hidden_size, state_size, action_size, node_size, embedding_size).to(device)
-
-    def parameters(self):
-        return (
-            list(self.decoder.parameters())
-            + list(self.encoder.parameters())
-            + list(self.reward_model.parameters())
-            + list(self.dynamics.parameters())
-        )
+        self.min_std = min_std
+        self.discrete = discrete
+        self.dist = self._build_distribution() 
+        self.fc_embed_state_action = self._build_embed_state_action()
+        self.rnn = nn.GRUCell(deter_size, deter_size)
+        self.fc_prior = self._build_temporal_prior()
+        self.fc_posterior = self._build_temporal_posterior()
     
-    def perform_rollout(self, actions, hidden=None, state=None, obs=None, non_terms=None):
-        
-        if hidden is not None and state is not None:
-            """ [action] (seq_len, batch_size, action_size )
-                [hidden] (batch_size, hidden_size ) 
-                [state]  (batch_size, state_size ) 
-            """
-            return self.dynamics(hidden, state, actions, obs, non_terms)
+    def _build_distribution(self):
+        if self.discrete:
+            pass
         else:
-            """ [action] (seq_len, batch_size, n_actions ) 
-                [hidden] (seq_len, batch_size, hidden_size ) 
-                [state]  (seq_len, batch_size, state_size ) 
-            """
-
-            batch_size = obs.size(1)
-            init_hidden, init_state = self.init_hidden_state(batch_size)
-
-            return self.dynamics(
-                init_hidden, init_state, actions, obs=obs, non_terms=non_terms
-            )
-
-    def eval(self):
-        self.encoder.eval()
-        self.decoder.eval()
-        self.dynamics.eval()
-        self.reward_model.eval()
-
-    def train(self):
-        self.encoder.train()
-        self.decoder.train()
-        self.dynamics.train()
-        self.reward_model.train()
-
-    def encode_obs(self, obs):
-        return self.encoder(obs)
-
-    def decode_obs(self, hiddens, posterior_states):
-        return self.decoder(hiddens, posterior_states)
+            return torch.distributions.Normal
     
-    def decode_reward(self, hiddens, posterior_states):
-        return self.reward_model(hiddens, posterior_states)
-    
-    def decode_sequence_obs(self, hiddens, posterior_states):
-        return self._bottle(self.decoder, (hiddens, posterior_states))
-
-    def decode_sequence_reward(self, hiddens, posterior_states):
-        return self._bottle(self.reward_model, (hiddens, posterior_states))
-
-    def encode_sequence_obs(self, obs):
-        return self._bottle(self.encoder, (obs,))
-
-    def init_hidden_state(self, batch_size):
-        init_hidden = torch.zeros(batch_size, self.hidden_size).to(self.device)
-        init_state = torch.zeros(batch_size, self.state_size).to(self.device)
-        return init_hidden, init_state
-
-    def init_hidden_state_action(self, batch_size):
-        init_hidden, init_state = self.init_hidden_state(batch_size)
-        action = torch.zeros(batch_size, self.action_size).to(self.device)
-        return init_hidden, init_state, action
-
-    def get_save_dict(self):
-        return {
-            "dynamics": self.dynamics.state_dict(),
-            "encoder": self.encoder.state_dict(),
-            "decoder": self.decoder.state_dict(),
-            "reward_model": self.reward_model.state_dict(),
-        }
-
-    def load_state_dict(self, model_dict):
-
-        self.dynamics.load_state_dict(model_dict["dynamics"])
-        self.encoder.load_state_dict(model_dict["encoder"])
-        self.decoder.load_state_dict(model_dict["decoder"])
-        self.reward_model.load_state_dict(model_dict["reward_model"])
-
-    def _bottle(self, f, x_tuple):
-
-        """ 
-        loops over the first dims of x (seq_len) and applies f 
-        Wraps the input tuple for a function to process a time x batch x features sequence in batch x features (assumes one output)
-        Instead of this (I think), we can reshape?
+    def _build_embed_state_action(self):
         """
-        x_sizes = tuple(map(lambda x: x.size(), x_tuple))
-        y = f(
-            *map(
-                lambda x: x[0].view(x[1][0] * x[1][1], *x[1][2:]), zip(x_tuple, x_sizes)
-            )
-        )
-        y_size = y.size()
-        return y.view(x_sizes[0][0], x_sizes[0][1], *y_size[1:])
+        model is supposed to take in previous stochastic state and previous action and embed it to deter size for rnn input
+        """
+        fc_embed_state_action = [nn.Linear(self.stoch_size + self.action_size, self.deter_size)]
+        fc_embed_state_action += [self.act_fn()]
+        return nn.Sequential(*fc_embed_state_action)
+    
+    def _build_temporal_prior(self):
+        """
+        model is supposed to take in latest deterministic state and output prior over stochastic latent states
+        """
+        if self.discrete:
+            pass
+        else:
+            temporal_prior = [nn.Linear(self.deter_size, self.node_size)]
+            temporal_prior += [self.act_fn()]
+            temporal_prior += [nn.Linear(self.node_size, 2 * self.stoch_size)]
+            return nn.Sequential(*temporal_prior)
+    
+    def _build_temporal_posterior(self):
+        """
+        model is supposed to take in latest embedded observation and deterministic state and output posterior over stochastic latent states
+        """
+        if self.discrete:
+            pass
+        else:
+            temporal_posterior = [nn.Linear(self.deter_size + self.embedding_size, self.node_size)]
+            temporal_posterior += [self.act_fn()]
+            temporal_posteriror += [nn.Linear(nn.Linear(self.node_size, 2 * self.stoch_size))]
+            return nn.Sequential(*temporal_posterior)
+    
+    def rssm_transition(self, prev_action, prev_model_state):
+        """
+        given previous_model_state and action, the model outputs latest model_state
+        this is equivalent to imagining in latent space
+        """
+        state_action_embed = self.fc_embed_state_action(torch.cat([prev_model_state.stoch,prev_action],dim=-1))
+        deter_state = self.rnn(state_action_embed, prev_model_state.deter)
+        
+        if self.discrete:
+            pass
+        else: 
+            prior_mean, prior_std = torch.chunk(self.fc_prior(deter_state), 2, dim=-1)
+            prior_std = F.softplus(std) + self.min_std
+            dist = self._dist(prior_mean,prior_std)
+            prior_stoch_state = dist.rsample()
+            prior_model_state = RSSMContState(prior_mean, prior_std, prior_stoch_state, deter_state)
+            
+            return prior_model_state 
+    
+    def rssm_representation(self, obs_embed, prev_action, prev_model_state):
+        """
+        given previous model_state, action and latest observation embedding, the model outputs latest model_state
+        """
+        if self.discrete:
+            pass
+        else:
+            prior_model_state = self.rssm_transition(prev_action, prev_model_state)
+            deter_state = prior_model_state.deter
+            x = torch.cat([deter_state, obs_embed], dim=-1)
+            posterior_mean, posterior_std = torch.chunk(self.fc_posterior(x), 2, dim=-1)
+            posterior_std = F.softplus(posterior_std) + self.min_std
+            dist = td.independent.Independent(self._dist(posterior_mean,posterior_std),1)
+            posterior_stoch_state = dist.rsample()
+            posterior_model_state = RSSMContState(posterior_mean, posterior_std, posterior_stoch_state, deter_state)
+            
+            return prior_model_state, posterior_model_state
+    
+    def rollout_representation(self, steps:int, obs_embed, action, prev_model_state):
+        """
+        :param steps: number of steps to roll out
+        :param obs_embed: size(time_steps, batch_size, embedding_size)
+        :param action: size(time_steps, batch_size, action_size)
+        :param prev_model_state: RSSM state
+        :return prior_state : size(time_steps, batch_size, state_size)
+        :return posterior_state : size(time_steps, batch_size, state_size)
+        """
+        priors = []
+        posteriors = []
+        for t in range(steps):
+            prior_model_state, posterior_model_state = self.rssm_representation(obs_embed[t],action[t],prev_model_state)
+            priors.append(prior_model_state)
+            posteriors.append(posterior_model_state)
+            prev_model_state = posterior_model_state
+        prior = stack_states(priors, dim=0)
+        post = stack_states(posteriors, dim=0)
+        return prior, post
+            
+    def rollout_transition(self, steps:int, action: torch.Tensor, prev_model_state):
+        """
+        param steps: number of steps to roll out
+        param action: size(time_steps, batch_size, action_size)
+        param prev_model_state: 
+        :return prior_state: size(time_steps, batch_size, state_size)
+        """
+        priors = []
+        state = prev_model_state
+        for t in range(steps):
+            state = self.rssm_transition(action[t], state)
+            priors.append(state)
+        prior = stack_states(priors, dim=0)
+        return prior
