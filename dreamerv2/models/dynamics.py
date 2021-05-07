@@ -2,6 +2,18 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+RSSMContState = namedtuple('RSSMContState',['mean', 'std', 'stoch', 'deter'])  
+
+def stack_states(rssm_states,dim):
+    """
+    :params rssm_states: RSSMConstState
+    """
+    return RSSMState(
+        torch.stack([state.mean for state in rssm_states], dim=dim),
+        torch.stack([state.std for state in rssm_states], dim=dim),
+        torch.stack([state.stoch for state in rssm_states], dim=dim),
+        torch.stack([state.deter for state in rssm_states], dim=dim),
+    )
 
 class RecurrentDynamics(nn.Module):
     

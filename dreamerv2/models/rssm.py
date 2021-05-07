@@ -1,4 +1,5 @@
 import torch
+from collections import namedtuple
 
 from dreamerv2.models import LinearEncoder, LinearDecoder, RewardModel, ActionModel, ValueModel
 
