@@ -10,7 +10,14 @@ states_size is the shape of stochastic state (s_t)
 
 class LinearDecoder(nn.Module):
 
-    def __init__(self, obs_size, hidden_size, state_size, node_size, act_fn="relu"):
+    def __init__(
+        self, 
+        obs_size, 
+        hidden_size, 
+        state_size, 
+        node_size, 
+        act_fn="relu"
+    ):
         super().__init__()
         self.act_fn = getattr(F, act_fn)
         self.fc_1 = nn.Linear(hidden_size + state_size, node_size)
@@ -25,11 +32,17 @@ class LinearDecoder(nn.Module):
 
 
 class ConvDecoder(nn.Module):
-    def __init__(self, hidden_size, state_size, embedding_size, act_fn="relu"):
+    def __init__(
+        self, 
+        deter_size, 
+        stoch_size, 
+        embedding_size, 
+        act_fn="relu"
+    ):
         super().__init__()
         self.act_fn = getattr(F, act_fn)
         self.embedding_size = embedding_size
-        self.fc_1 = nn.Linear(hidden_size + state_size, embedding_size)
+        self.fc_1 = nn.Linear(deter_size + stoch_size, embedding_size)
         self.conv_1 = nn.ConvTranspose2d(embedding_size, 128, 5, stride=2)
         self.conv_2 = nn.ConvTranspose2d(128, 64, 5, stride=2)
         self.conv_3 = nn.ConvTranspose2d(64, 32, 6, stride=2)
@@ -47,7 +60,14 @@ class ConvDecoder(nn.Module):
 
 class RewardModel(nn.Module):
 
-    def __init__(self, hidden_size, state_size, node_size, act_fn="relu", dist="normal"):
+    def __init__(
+        self, 
+        hidden_size, 
+        state_size, 
+        node_size, 
+        act_fn="relu", 
+        dist="normal"
+    ):
         super().__init__()
         self.act_fn = getattr(F, act_fn)
         self.fc_1 = nn.Linear(hidden_size + state_size, node_size)
@@ -66,7 +86,13 @@ class RewardModel(nn.Module):
 
 class ValueModel(nn.Module):
 
-    def __init__(self, hidden_size, state_size, node_size, act_fn="relu"):
+    def __init__(
+        self, 
+        hidden_size, 
+        state_size, 
+        node_size, 
+        act_fn="relu"
+    ):
         super().__init__()
         self.act_fn = getattr(F, act_fn)
         self.fc_1 = nn.Linear(hidden_size + state_size, node_size)
