@@ -1,1 +1,1 @@
-from .buffers import Buffer
+from .buffers import EpisodicBuffer
