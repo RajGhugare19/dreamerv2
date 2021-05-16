@@ -2,35 +2,16 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F 
 import torch.distributions
+from typing import Tuple, Iterable
+import numpy as np
 
 """
-hidden_size is the shape of deterministic hidden state (h_t)
-states_size is the shape of stochastic state (s_t)
+:params deter_size : size of deterministic recurrent states
+:params stoch_size : size of stochastic states
+:params node_size : size of fc hidden layers of all NNs
+:params: obs_size : size of input observations
+:params: embedding_size : size of output of observation encoder
 """
-
-class LinearDecoder(nn.Module):
-
-    def __init__(
-        self, 
-        obs_size, 
-        hidden_size, 
-        state_size, 
-        node_size, 
-        act_fn="relu"
-    ):
-        super().__init__()
-        self.act_fn = getattr(F, act_fn)
-        self.fc_1 = nn.Linear(hidden_size + state_size, node_size)
-        self.fc_2 = nn.Linear(node_size, node_size)
-        self.fc_3 = nn.Linear(node_size, obs_size)
-    
-    def forward(self, hidden, state):
-        out = self.act_fn(self.fc_1(torch.cat([hidden, state], dim=1)))
-        out = self.act_fn(self.fc_2(out))
-        obs = self.fc3(out)
-        return obs
-
-
 class ConvDecoder(nn.Module):
     def __init__(
         self, 
@@ -58,49 +39,143 @@ class ConvDecoder(nn.Module):
         return obs
 
 
-class RewardModel(nn.Module):
-
+class LinearEncoder(nn.Module):
     def __init__(
         self, 
-        hidden_size, 
-        state_size, 
+        obs_shape: Tuple[int],  
+        node_size,
+        embedding_size,
+        act_fn=nn.ELU
+    ):
+        super().__init__()
+
+        self.act_fn = act_fn
+        self.obs_shape = obs_shape
+        self.node_size = node_size
+        self.embedding_size = embedding_size
+        self.model = self._build_model()
+
+    def _build_model(self):
+        model = [nn.Linear(np.prod(self.obs_shape), self.node_size)]
+        model += [self.act_fn()]
+        model += [nn.Linear(self.node_size, self.node_size)]
+        model += [self.act_fn()]
+        model += [nn.Linear(self.node_size, self.embedding_size)]
+        return nn.Sequential(*model)
+    
+    def forward(self, inp):
+        embedding = self.model(inp)
+        return embedding
+
+class LinearDecoder(nn.Module):
+    def __init__(
+        self, 
+        obs_shape: Tuple[int], 
+        deter_size, 
+        stoch_size, 
         node_size, 
-        act_fn="relu", 
+        dist='normal',
+        act_fn=nn.ELU
+    ):  
+        super().__init__()
+        self.act_fn = act_fn
+        self.obs_shape = obs_shape
+        self.deter_size = deter_size
+        self.stoch_size = stoch_size
+        self.node_size = node_size
+        self.model = self._build_model()
+    
+    def _build_model(self):
+        model = [nn.Linear(self.deter_size+self.stoch_size, self.node_size)]
+        model += [self.act_fn()]
+        model += [nn.Linear(self.node_size,int(np.prod(self.obs_shape)))]
+        return nn.Sequential(*model)
+
+    def forward(self, model_state):
+        reconst_obs = self.model(model_state)
+        return reconst_obs
+
+class RewardModel(nn.Module):
+    def __init__(
+        self, 
+        deter_size, 
+        stoch_size, 
+        node_size, 
+        act_fn=nn.ELU, 
         dist="normal"
     ):
         super().__init__()
-        self.act_fn = getattr(F, act_fn)
-        self.fc_1 = nn.Linear(hidden_size + state_size, node_size)
-        self.fc_2 = nn.Linear(node_size, node_size)
-        self.fc_3 = nn.Linear(node_size, 1)
+        self.act_fn = act_fn
+        self.deter_size = deter_size 
+        self.stoch_size = stoch_size 
+        self.node_size = node_size
+        self.model  = self._build_model()
 
-    def forward(self, hidden, state):
-        out = self.act_fn(self.fc_1(torch.cat([hidden, state], dim=1)))
-        out = self.act_fn(self.fc_2(out))
-        mean_reward = self.fc_3(out).squeeze(dim=1)
-        if self.dist == "normal":
-            return torch.distributions.Normal(mean_reward,1)
-        #reward = d.rsample()
-        #return d
+    def _build_model(self):
+        model = [nn.Linear(self.deter_size+self.stoch_size, self.node_size)]
+        model += [self.act_fn()]
+        model += [nn.Linear(self.node_size, self.node_size)]
+        model += [self.act_fn()]
+        model += [nn.Linear(self.node_size, 1)]
+        return nn.Sequential(*model)
 
+    def forward(self, model_state):
+        mean_reward = self.model(model_state)
+        return mean_reward
 
+class DiscountModel(nn.Module):
+    def __init_(
+        self,
+        deter_size, 
+        stoch_size, 
+        node_size, 
+        dist="binary",
+        act_fn=nn.ELU,
+    ):
+
+        super().__init__()
+        self.act_fn = act_fn
+        self.deter_size = deter_size
+        self.stoch_size = stoch_size
+        self.node_size = node_size
+        self.dist = dist
+        self.model = self._build_model()
+    
+    def _build_model(self):
+        model = [nn.Linear(self.deter_size+self.stoch_size, self.node_size)]
+        model += [self.act_fn()]
+        model += [nn.Linear(self.node_size, self.node_size)]
+        model += [self.act_fn()]
+        return nn.Sequential(*model)
+    
+    def forward(self, model_state):
+        disc_logits = self.model(model_state)
+        return disc_logits        
+    
 class ValueModel(nn.Module):
-
     def __init__(
         self, 
-        hidden_size, 
-        state_size, 
+        deter_size, 
+        stoch_size, 
         node_size, 
-        act_fn="relu"
+        act_fn=nn.ELU, 
     ):
         super().__init__()
-        self.act_fn = getattr(F, act_fn)
-        self.fc_1 = nn.Linear(hidden_size + state_size, node_size)
-        self.fc_2 = nn.Linear(node_size, node_size)
-        self.fc_3 = nn.Linear(node_size, 1)
+        self.act_fn = act_fn
+        self.deter_size = deter_size 
+        self.stoch_size = stoch_size 
+        self.node_size = node_size
+        self.model  = self._build_model()
     
-    def forward(self,hidden,state):
-        out = self.act_fn(self.fc_1(torch.cat([hidden, state], dim=1)))
-        out = self.act_fn(self.fc_2(out))
-        value = self.fc_3(out).squeeze(dim=1)
+    def _build_model(self):
+        model = [nn.Linear(self.deter_size+self.stoch_size, self.node_size)]
+        model += [self.act_fn()]
+        model += [nn.Linear(self.node_size, self.node_size)]
+        model += [self.act_fn()]
+        model += [nn.Linear(self.node_size, 1)]
+        return nn.Sequential(*model)
+
+    def forward(self, model_state):
+        value = self.model(model_state)
         return value 
+
