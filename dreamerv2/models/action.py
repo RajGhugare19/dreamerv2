@@ -18,7 +18,12 @@ class ActionModel(nn.Module):
         act_fn=nn.ELU, 
         mean_scale=5, 
         min_std=1e-4, 
-        init_std=5
+        init_std=5,
+        train_noise=0.4,
+        eval_noise=0,
+        expl_type="additive_gaussian",
+        expl_min=0.1,
+        expl_decay=7000,
     ):
         """
         :params deter_size : size of deterministic recurrent states
@@ -37,7 +42,12 @@ class ActionModel(nn.Module):
         self._init_std = init_std
         self._min_std = min_std
         self.raw_init_std = np.log(np.exp(self._init_std) - 1)
-
+        self.train_noise = train_noise
+        self.eval_noise = eval_noise
+        self.expl_type = expl_type
+        self.expl_min = expl_min
+        self.expl_decay = expl_decay
+        
     def _build_model(self):
         model = [nn.Linear(self.deter_size+self.stoch_size, self.node_size)]
         model += [self.act_fn()]
@@ -69,23 +79,49 @@ class ActionModel(nn.Module):
     
     def forward(self, rssm_state):
         """
-        uses feat to infer action aka single policy rollout
+        single policy rollout
         """
         feat = get_feat(rssm_state)
         action_dist = self.get_action_dist(feat)
         if self.dist == 'tanh_normal':
-            #Continuous action spaces
             if self.training:
                 action = action_dist.rsample()
             else:
                 action = action_dist.mode()
         elif self.dist == 'one_hot':
-            #discrete action spaces
             action = action_dist.sample()
             action = action + action_dist.probs - action_dist.probs.detach()
         else:
             raise NotImplementedError
         return action, action_dist
     
-    def exploration(self, action: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError
+    def exploration(self, action: torch.Tensor, itr: int):
+        """
+        :param action: action to take, shape (1,) (if categorical), or (action dim,) (if continuous)
+        :return: action of the same shape passed in, augmented with some noise
+        """
+        if self.training:
+            expl_amount = self.train_noise
+            if self.expl_decay:  # Linear decay
+                expl_amount = expl_amount - itr / self.expl_decay
+            if self.expl_min:
+                expl_amount = max(self.expl_min, expl_amount)
+        else:
+            expl_amount = self.eval_noise
+        
+        '''for continuous actions'''    
+        if self.expl_type == 'additive_gaussian':  
+            noise = torch.randn(*action.shape, device=action.device) * expl_amount
+            return torch.clamp(action + noise, -1, 1)
+        if self.expl_type == 'completely_random':  
+            if expl_amount == 0:
+                return action
+            else:
+                return torch.rand(*action.shape, device=action.device) * 2 - 1
+            
+        '''for discrete actions'''
+        if self.expl_type == 'epsilon_greedy':
+            index = torch.randint(0, self.action_size, action.shape[:-1], device=action.device)
+            action = torch.zeros_like(action)
+            action[..., index] = 1
+            return action
