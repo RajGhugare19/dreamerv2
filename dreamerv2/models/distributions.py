@@ -1,13 +1,19 @@
 import torch 
 import torch.nn.functional as F 
-import torch.distributions
+import torch.distributions as td
 import numpy as np 
 
 class TanhBijector(torch.distributions.Transform):
+    """
+    https://pytorch.org/docs/stable/_modules/torch/distributions/transforms.html#TanhTransform
+    ^this can also be used, but it does not clamp before inverting
+    """
     def __init__(self):
         super().__init__()
         self.bijective = True
-
+        self.domain = torch.distributions.constraints.real
+        self.codomain = torch.distributions.constraints.interval(-1.0, 1.0)
+        
     @property
     def sign(self):
         return 1.
@@ -22,17 +28,16 @@ class TanhBijector(torch.distributions.Transform):
             y
         )
 
-        y = atanh(y)
+        y = torch.atanh(y)
         return y
 
     def log_abs_det_jacobian(self, x, y):
         return 2. * (np.log(2) - x - F.softplus(-2. * x))
 
-
-class SampleDist():
     
+class SampleDist():
     def __init__(self, dist, samples=100):
-        self.dist = dist 
+        self._dist = dist 
         self._samples = samples 
     
     @property
@@ -57,6 +62,9 @@ class SampleDist():
         return torch.gather(sample, 0, indices).squeeze(0)
 
     def entropy(self):
+        """
+        Returns entropy of distribution, batched over batch_shape.
+        """
         dist = self._dist.expand((self._samples, *self._dist.batch_shape))
         sample = dist.rsample()
         logprob = dist.log_prob(sample)
@@ -64,7 +72,3 @@ class SampleDist():
 
     def sample(self):
         return self._dist.sample()
-
-def atanh(x):
-    return 0.5 * torch.log((1 + x) / (1 - x))
-
