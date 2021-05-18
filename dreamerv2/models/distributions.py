@@ -3,7 +3,7 @@ import torch.nn.functional as F
 import torch.distributions as td
 import numpy as np 
 
-class TanhBijector(torch.distributions.Transform):
+class TanhBijector(td.Transform):
     """
     https://pytorch.org/docs/stable/_modules/torch/distributions/transforms.html#TanhTransform
     ^this can also be used, but it does not clamp before inverting

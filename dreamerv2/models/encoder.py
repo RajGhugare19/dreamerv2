@@ -1,22 +1,36 @@
 import torch 
 import torch.nn as nn
 import torch.nn.functional as F 
+import numpy as np
+from typing import Tuple
 
 class LinearEncoder(nn.Module):
-
-    def __init__(self, obs_size, embedding_size, node_size, act_fn="relu"):
+    def __init__(
+        self, 
+        obs_shape: Tuple[int],  
+        node_size,
+        embedding_size,
+        act_fn=nn.ELU
+    ):
         super().__init__()
 
-        self.act_fn = getattr(F, act_fn)
-        self.fc_1 = nn.Linear(obs_size, node_size)
-        self.fc_2 = nn.Linear(node_size, node_size)
-        self.fc_3 = nn.Linear(node_size, embedding_size)
+        self.act_fn = act_fn
+        self.obs_shape = obs_shape
+        self.node_size = node_size
+        self.embedding_size = embedding_size
+        self.model = self._build_model()
 
-    def forward(self, obs):
-        out = self.act_fn(self.fc_1(obs))
-        out = self.act_fn(self.fc_2(out))
-        out = self.fc_3(out)
-        return out
+    def _build_model(self):
+        model = [nn.Linear(np.prod(self.obs_shape), self.node_size)]
+        model += [self.act_fn()]
+        model += [nn.Linear(self.node_size, self.node_size)]
+        model += [self.act_fn()]
+        model += [nn.Linear(self.node_size, self.embedding_size)]
+        return nn.Sequential(*model)
+    
+    def forward(self, inp):
+        embedding = self.model(inp)
+        return embedding
 
 class ConvEncoder(nn.Module):
     def __init__(self, embedding_size, act_fn="relu"):

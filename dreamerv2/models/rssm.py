@@ -7,7 +7,6 @@ from dreamerv2.utils import stack_states
 
 RSSMContState = namedtuple('RSSMContState',['mean', 'std', 'stoch', 'deter'])  
 
-
 class RSSM(nn.Module):
     def __init__(
         self,
@@ -70,73 +69,77 @@ class RSSM(nn.Module):
         temporal_posterior += [nn.Linear(self.node_size, 2 * self.stoch_size)]
         return nn.Sequential(*temporal_posterior)
     
-    def rssm_imagine(self, prev_action, prev_model_state):
+    def rssm_imagine(self, prev_action, prev_rssm_state):
         """
-        given previous_model_state and action, the model outputs latest model_state
+        given previous_rssm_state and previous action, the model outputs latest rssm_state
         this is equivalent to imagining in latent space
         """
-        state_action_embed = self.fc_embed_state_action(torch.cat([prev_model_state.stoch, prev_action],dim=-1))
-        deter_state = self.rnn(state_action_embed, prev_model_state.deter)
+        state_action_embed = self.fc_embed_state_action(torch.cat([prev_rssm_state.stoch, prev_action],dim=-1))
+        deter_state = self.rnn(state_action_embed, prev_rssm_state.deter)
 
         prior_mean, prior_std = torch.chunk(self.fc_prior(deter_state), 2, dim=-1)
         prior_std = F.softplus(prior_std) + self.min_std
         prior_stoch_state = prior_mean + prior_std*torch.randn_like(prior_mean)
-        prior_model_state = RSSMContState(prior_mean, prior_std, prior_stoch_state, deter_state)
+        prior_rssm_state = RSSMContState(prior_mean, prior_std, prior_stoch_state, deter_state)
             
-        return prior_model_state 
+        return prior_rssm_state 
     
-    def rssm_observe(self, obs_embed, prev_action, prev_model_state):
+    def rollout_imagination(self, horizon:int, actor, prev_rssm_state):
         """
-        given previous model_state, action and latest observation embedding, 
-        the model outputs latest model_state
+        :param horizon: number of steps to roll out
+        :param actor: nn.Module for Actor
+        :param prev_rssm_state: (batch_size, stoch_size)
         """
-        prior_model_state = self.rssm_imagine(prev_action, prev_model_state)
-        deter_state = prior_model_state.deter
+        rssm_state = prev_rssm_state
+        next_rssm_states = []
+        actions = []
+        for t in range(horizon):
+            action, _ = actor(prev_rssm_state)
+            rssm_state = self.rssm_imagine(action, rssm_state)
+            next_rssm_states.append(rssm_state)
+            actions.append(action)
+            
+        next_rssm_states = stack_states(next_rssm_states, dim=0)
+        actions = torch.stack(actions, dim=0)
+        return next_rssm_states, actions
+    
+    def rssm_observe(self, obs_embed, prev_action, prev_rssm_state):
+        """
+        given previous rssm_state, action and latest observation embedding, 
+        the model outputs latest rssm_state
+        """
+        prior_rssm_state = self.rssm_imagine(prev_action, prev_rssm_state)
+        deter_state = prior_rssm_state.deter
         x = torch.cat([deter_state, obs_embed], dim=-1)
         posterior_mean, posterior_std = torch.chunk(self.fc_posterior(x), 2, dim=-1)
         posterior_std = F.softplus(posterior_std) + self.min_std
         posterior_stoch_state = posterior_mean + posterior_std*torch.randn_like(posterior_mean)
-        posterior_model_state = RSSMContState(posterior_mean, posterior_std, posterior_stoch_state, deter_state)
+        posterior_rssm_state = RSSMContState(posterior_mean, posterior_std, posterior_stoch_state, deter_state)
         
-        return prior_model_state, posterior_model_state
+        return prior_rssm_state, posterior_rssm_state
     
-    def rollout_imagination(self, steps:int, action: torch.Tensor, prev_model_state):
-        """
-        param steps: number of steps to roll out
-        param action: size(time_steps, batch_size, action_size)
-        param prev_model_state: 
-        :return prior_state: size(time_steps, batch_size, state_size)
-        """
-        priors = []
-        state = prev_model_state
-        for t in range(steps):
-            state = self.rssm_imagine(action[t], state)
-            priors.append(state)
-        prior = stack_states(priors, dim=0)
-        return prior
-    
-    def rollout_observation(self, seq_len:int, obs_embed: torch.Tensor, action: torch.Tensor, prev_model_state):
+    def rollout_observation(self, seq_len:int, obs_embed: torch.Tensor, action: torch.Tensor, prev_rssm_state):
         """
         :param seq_len: number of steps to roll out
-        :param obs_embed: size(time_steps, batch_size, embedding_size)
-        :param action: size(time_steps, batch_size, action_size)
-        :param prev_model_state: RSSM state
+        :param obs_embed: (time_steps, batch_size, embedding_size)
+        :param action: (time_steps, batch_size, action_size)
+        :param prev_rssm_state: RSSMContstate
         :return prior_state : 
         :return posterior_state : 
         """
         priors = []
         posteriors = []
         for t in range(seq_len):
-            prior_model_state, posterior_model_state = self.rssm_observe(obs_embed[t],action[t],prev_model_state)
-            priors.append(prior_model_state)
-            posteriors.append(posterior_model_state)
-            prev_model_state = posterior_model_state
+            prior_rssm_state, posterior_rssm_state = self.rssm_observe(obs_embed[t], action[t], prev_rssm_state)
+            priors.append(prior_rssm_state)
+            posteriors.append(posterior_rssm_state)
+            prev_rssm_state = posterior_rssm_state
             
         prior = stack_states(priors, dim=0)
         post = stack_states(posteriors, dim=0)
         return prior, post
 
-    def _init_model_state(self, batch_size, **kwargs):
+    def _init_rssm_state(self, batch_size, **kwargs):
         return RSSMContState(
             torch.zeros(batch_size, self.stoch_size, **kwargs).to(self.device),
             torch.zeros(batch_size, self.stoch_size, **kwargs).to(self.device),
