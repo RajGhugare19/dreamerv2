@@ -4,7 +4,10 @@ import torch.optim as optim
 import torch.distributions as td
 from torch.distributions.kl import kl_divergence
 from dreamerv2.utils import RSSMContState, get_feat, seq_to_batch, batch_to_seq, get_dist, get_parameters, FreezeParameters, rssm_seq_to_batch, rssm_batch_to_seq, lambda_return, rssm_detach
-from dreamerv2.models import ActionModel, LinearEncoder, LinearDecoder, RewardModel, ValueModel, RSSM
+from dreamerv2.models.action import ActionModel
+from dreamerv2.models.encoder import LinearEncoder 
+from dreamerv2.models.decoder import LinearDecoder, RewardModel, ValueModel
+from dreamerv2.models.rssm import RSSM
 
 
 class Trainer(object):
@@ -33,10 +36,11 @@ class Trainer(object):
     ):
       
         if not pixels:
-            self.ObsEcoder = LinearEncoder(obs_shape, node_size, embedding_size)
+            self.ObsEncoder = LinearEncoder(obs_shape, node_size, embedding_size)
             self.ObsDecoder = LinearDecoder(obs_shape, deter_size, stoch_size, node_size)
         else:
             pass 
+        
         self.RSSM = RSSM(action_size, deter_size, stoch_size, node_size, embedding_size)
         self.RewardDecoder = RewardModel(deter_size, stoch_size, node_size)
         self.ActionModel = ActionModel(action_size, deter_size, stoch_size, node_size, action_dist)
@@ -47,12 +51,15 @@ class Trainer(object):
         self.model_lr = model_lr
         self.actor_lr = actor_lr
         self.value_lr = value_lr
-        self.device = device
+        self.discount = discount
+        self.discount_lambda = discount_lambda
         self.horizon = horizon
-        self.free_nats = torch.full((1,), free_nats).to(self.device)
         self.grad_clip_norm = grad_clip_norm
+        self.pixels = pixels
+        self.device = device
         self.optim_initialize()
-    
+        self.free_nats = torch.full((1,), free_nats).to(self.device)
+        
     def optim_initialize(self):
         self.world_list = [self.ObsEncoder, self.RSSM, self.RewardDecoder, self.ObsDecoder]
         self.actor_list = [self.ActionModel]
@@ -67,7 +74,6 @@ class Trainer(object):
         """ (seq_len, batch_size, *dims) """
         obs, actions, rewards, nonterms = buffer.sample(self.seq_len, self.batch_size)
         
-        #Dynamics Learning
         """embedded observation: (seq_len, batch_size, embedding_size) """
         obs_embed = self.ObsEncoder(obs)
         
@@ -87,36 +93,32 @@ class Trainer(object):
         kl_loss = self._kl_loss(prior_dist, posterior_dist)
         model_loss = obs_loss + reward_loss + kl_loss
         
-        self._optimizer.zero_grad()
-        self.model_loss.backward()
-        nn.utils.clip_grad_norm_(self.world_list, self.grad_clip_norm, norm_type=2)
+        #Dynamics Learning
+        self.model_optimizer.zero_grad()
+        model_loss.backward()
+        nn.utils.clip_grad_norm_(get_parameters(self.world_list), self.grad_clip_norm, norm_type=2)
         self.model_optimizer.step()
         
-        #Behaviour Learning
         with torch.no_grad():
             batched_posterior = rssm_detach(rssm_seq_to_batch(posterior, self.batch_size, self.seq_len))
         with FreezeParameters(self.world_list):
-            imag_rssm_states, imag_actions = self.RSSM.rollout_imagination(self.horizon, self.ActionModel, batched_posterior)
+            imag_rssm_states, _ = self.RSSM.rollout_imagination(self.horizon, self.ActionModel, batched_posterior)
         imag_feat = get_feat(imag_rssm_states)
-        with FreezeParameters(self.world_list+[self.Value]):
-            imag_reward = self.RewardModel(imag_feat)
+        with FreezeParameters(self.world_list+[self.ValueModel]):
+            imag_reward = self.RewardDecoder(imag_feat)
             imag_value = self.ValueModel(imag_feat)
         
-        discount_tensor = 0.99 * torch.ones_like(imag_reward)
-        returns = lambda_return(imag_reward[:-1], imag_value[:-1], imag_value[-1], discount_tensor[:-1])
-        actor_loss = -torch.mean(discount_tensor * returns)
-        
-        discount = torch.cumprod(discount_tensor[:-1], 0)
-        
+        discount_tensor = self.discount * torch.ones_like(imag_reward)
+        returns = lambda_return(imag_reward, imag_value, imag_value[-1], discount_tensor, self.discount_lambda)
+        actor_loss = self._actor_loss(returns)
+                
         with torch.no_grad():
-            value_feat = imag_feat[:-1].detach()
-            value_discount = discount.detach()
+            _imag_feat = imag_feat.detach()
             value_target = returns.detach()
-            value_pred = self.ValueModel(value_feat)
-            value_dist = td.independent.Independent(td.Normal(value_pred,1),1)
-            log_prob = value_dist.log_prob(value_target)
-            value_loss = -torch.mean(value_discount * log_prob.unsqueeze(2))
+        value_pred = self.ValueModel(_imag_feat)        
+        value_loss = self._value_loss(value_pred, value_target)
         
+        #Behaviour Learning
         self.actor_optimizer.zero_grad()
         self.value_optimizer.zero_grad()
         
@@ -155,13 +157,13 @@ class Trainer(object):
     def _reward_loss(self, rewards, decoded_rewards):
         if not self.pixels:
             reward_dist = td.independent.Independent(td.Normal(decoded_rewards,1),1)
-            reward_loss = -torch.mean(reward_dist.log_probs(rewards))
+            reward_loss = -torch.mean(reward_dist.log_prob(rewards))
         else:
             raise NotImplementedError
         return reward_loss
     
     def _kl_loss(self, prior_dist, posterior_dist):
-        kl_divergence(posterior_dist, prior_dist)
+
         if self.free_nats is not None:
             div = torch.mean(kl_divergence(posterior_dist, prior_dist))
             return torch.max(
@@ -170,12 +172,23 @@ class Trainer(object):
         else:
             return kl_divergence(posterior_dist, prior_dist).mean(dim=(0,1))       
     
+    def _actor_loss(self, returns):
+        action_loss = -torch.mean(returns)
+        return action_loss
+    
+    def _value_loss(self, value_pred, value_target):
+        value_dist = td.independent.Independent(td.Normal(value_pred,1),1)
+        log_prob = value_dist.log_prob(value_target)
+        value_loss = -torch.mean(log_prob)
+        return value_loss
+
+    
     def get_save_dict(self):
         return {
             "RSSM": self.RSSM.state_dict(),
-            "ObsEncoder": self.ObsDecoder.state_dict(),
-            "ObsDecoder": self.ObsEncoder.state_dict(),
-            "RewardModel": self.RewardModel.state_dict(),
+            "ObsEncoder": self.ObsEncoder.state_dict(),
+            "ObsDecoder": self.ObsDecoder.state_dict(),
+            "RewardDecoder": self.RewardDecoder.state_dict(),
             "ActionModel": self.ActionModel.state_dict(),
             "ValueModel": self.ValueModel.state_dict(),
         }
@@ -184,6 +197,6 @@ class Trainer(object):
         self.RSSM.load_state_dict(saved_dict["RSSM"])
         self.ObsEncoder.load_state_dict(saved_dict["ObsEncoder"])
         self.ObsDecoder.load_state_dict(saved_dict["ObsDecoder"])
-        self.RewardModel.load_state_dict(saved_dict["RewardModel"])
+        self.RewardDecoder.load_state_dict(saved_dict["RewardDecoder"])
         self.ActionModel.load_state_dict(saved_dict["ActionModel"])
         self.ValueModel.load_state_dict(saved_dict["ValueModel"])
