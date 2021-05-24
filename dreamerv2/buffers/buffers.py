@@ -7,6 +7,7 @@ from collections import namedtuple, deque
 
 Episode = namedtuple('Episode', ['obs', 'act', 'rew', 'nonterms', 'length'])  
 
+Episode = namedtuple('Episode', ['obs', 'act', 'rew', 'nonterms', 'length'])  
 class EpisodicBuffer():
     """
     Stores each episode as a namedtuple in a deque.
@@ -75,8 +76,15 @@ class EpisodicBuffer():
             obs_batch[:,ind], act_batch[:,ind], rew_batch[:,ind], nonterm_batch[:,ind] = self._sample_seq(episode, seq_len)
         return obs_batch, act_batch, rew_batch , nonterm_batch
     
-    def sample(self, seq_len, batch_size):
+    def sample_batch_first(self, seq_len, batch_size):
         episode_list = random.choices(self.memory, k=batch_size)
+        obs_batch = np.zeros([batch_size, seq_len, *self.obs_shape], dtype=self.obs_dtype)
+        act_batch = np.zeros([batch_size, seq_len, self.action_size], dtype=self.action_dtype)
+        rew_batch = np.zeros([batch_size, seq_len], dtype=np.float32)
+        nonterm_batch = np.zeros([batch_size, seq_len], dtype=bool)
+        for ind,episode in enumerate(episode_list):
+                obs_batch[ind,:], act_batch[ind,:], rew_batch[ind,:], nonterm_batch[ind,:] = self._sample_seq(episode, seq_len)
+        return obs_batch, act_batch, rew_batch , nonterm_batch
     
     def _episode_toarray(self):
         o = np.stack(self.obs, axis=0)
