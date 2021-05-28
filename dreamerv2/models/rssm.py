@@ -1,41 +1,28 @@
 import torch
+from torch._C import device
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.distributions as td
-from collections import namedtuple
-from dreamerv2.utils import stack_states
-
-RSSMContState = namedtuple('RSSMContState',['mean', 'std', 'stoch', 'deter'])  
+from dreamerv2.utils.rssm_utils import stack_states, RSSMContState
 
 class RSSM(nn.Module):
     def __init__(
         self,
-        action_size: int, 
-        deter_size: int, 
-        stoch_size: int, 
-        node_size: int, 
-        embedding_size: int,  
-        act_fn=nn.ELU, 
-        device="cpu", 
+        model_config,
+        device,
+        act_fn=nn.ELU,  
         min_std=0.1, 
     ):
         super().__init__()
-        """ 
-        :params deter_size : size of deterministic recurrent states
-        :params stoch_size : size of stochastic states
-        :params node_size : size of fc hidden layers of all NNs
-        :params embedding_size : size of embedding of observation decoder
-        :params discrete : latent space representation
-        """
-        self.action_size = action_size
-        self.deter_size = deter_size
-        self.stoch_size = stoch_size
-        self.node_size = node_size
-        self.embedding_size = embedding_size
         self.device = device
-        self.min_std = min_std 
+        self.action_size = model_config['action_size']
+        self.deter_size = model_config['deter_size']
+        self.stoch_size = model_config['stoch_size']
+        self.node_size = model_config['node_size']
+        self.embedding_size = model_config['embedding_size']
+        self.min_std = min_std
+
         self.act_fn = act_fn
-        self.rnn = nn.GRUCell(deter_size, deter_size)
+        self.rnn = nn.GRUCell(self.deter_size, self.deter_size)
         self.fc_embed_state_action = self._build_embed_state_action()
         self.fc_prior = self._build_temporal_prior()
         self.fc_posterior = self._build_temporal_posterior()
@@ -52,7 +39,7 @@ class RSSM(nn.Module):
     def _build_temporal_prior(self):
         """
         model is supposed to take in latest deterministic state 
-        and output prior over stochastic latent states
+        and output prior over stochastic state
         """
         temporal_prior = [nn.Linear(self.deter_size, self.node_size)]
         temporal_prior += [self.act_fn()]
@@ -61,8 +48,8 @@ class RSSM(nn.Module):
 
     def _build_temporal_posterior(self):
         """
-        model is supposed to take in latest embedded observation 
-        and deterministic state and output posterior over stochastic latent states
+        model is supposed to take in latest embedded observation and deterministic state 
+        and output posterior over stochastic states
         """
         temporal_posterior = [nn.Linear(self.deter_size + self.embedding_size, self.node_size)]
         temporal_posterior += [self.act_fn()]
@@ -84,10 +71,10 @@ class RSSM(nn.Module):
             
         return prior_rssm_state 
     
-    def rollout_imagination(self, horizon:int, actor, prev_rssm_state):
+    def rollout_imagination(self, horizon:int, actor:nn.Module, prev_rssm_state):
         """
         :param horizon: number of steps to roll out
-        :param actor: nn.Module for Actor
+        :param actor: nn.Module for ActionModel
         :param prev_rssm_state: (batch_size, stoch_size)
         """
         rssm_state = prev_rssm_state
@@ -105,8 +92,10 @@ class RSSM(nn.Module):
     
     def rssm_observe(self, obs_embed, prev_action, prev_rssm_state):
         """
-        given previous rssm_state, action and latest observation embedding, 
-        the model outputs latest rssm_state
+        given previous rssm_state, action and latest observation embedding, the model outputs latest rssm_state
+        :param obs_embed: (batch_size, embedding_size)
+        :param prev_action: (batch_size, action_size)
+        :param prev_rssm_state: RSSMContState
         """
         prior_rssm_state = self.rssm_imagine(prev_action, prev_rssm_state)
         deter_state = prior_rssm_state.deter

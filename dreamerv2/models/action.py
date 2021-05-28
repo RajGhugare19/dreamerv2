@@ -10,20 +10,15 @@ from dreamerv2.utils import get_feat
 class ActionModel(nn.Module):
     def __init__(
         self, 
-        action_size, 
-        deter_size, 
-        stoch_size, 
-        node_size, 
-        dist="tanh_normal", 
-        act_fn=nn.ELU, 
+        model_config,
+        act_fn=nn.ELU,
         mean_scale=5, 
         min_std=1e-4, 
         init_std=5,
-        train_noise=0.4,
+        train_noise=0.5,
         eval_noise=0,
-        expl_type="additive_gaussian",
-        expl_min=0.1,
-        expl_decay=7000,
+        expl_min=0.01,
+        expl_decay=10000,
     ):
         """
         :params deter_size : size of deterministic recurrent states
@@ -32,21 +27,22 @@ class ActionModel(nn.Module):
         """
         super().__init__()
         self.act_fn = act_fn
-        self.action_size = action_size
-        self.deter_size = deter_size
-        self.stoch_size = stoch_size
-        self.node_size = node_size
-        self.dist = dist
-        self.model = self._build_model()
+        self.action_size = model_config['action_size']
+        self.deter_size = model_config['deter_size']
+        self.stoch_size = model_config['stoch_size']
+        self.node_size = model_config['node_size']
+        self.embedding_size = model_config['embedding_size']
+        self.dist = model_config['action_dist']
         self._mean_scale = mean_scale
         self._init_std = init_std
         self._min_std = min_std
         self.raw_init_std = np.log(np.exp(self._init_std) - 1)
         self.train_noise = train_noise
         self.eval_noise = eval_noise
-        self.expl_type = expl_type
+        self.expl_type = model_config['expl_type']
         self.expl_min = expl_min
         self.expl_decay = expl_decay
+        self.model = self._build_model()
         
     def _build_model(self):
         model = [nn.Linear(self.deter_size+self.stoch_size, self.node_size)]
@@ -56,13 +52,13 @@ class ActionModel(nn.Module):
         if self.dist=="tanh_normal":
             model += [nn.Linear(self.node_size, self.action_size*2)]
         elif self.dist=="one_hot":
-            model += [nn.Linear(self.node_size,self.action_size)]
+            model += [nn.Linear(self.node_size, self.action_size)]
         else:
             raise NotImplementedError
         return nn.Sequential(*model)
 
-    def get_action_dist(self, feat):    
-        action = self.model(feat)
+    def get_action_dist(self, modelstate):    
+        action = self.model(modelstate)
         if self.dist == "tanh_normal":
             action_mean, action_std_dev = torch.chunk(action, 2, dim=1)
             action_mean = self._mean_scale * torch.tanh(action_mean/self._mean_scale)
@@ -95,14 +91,10 @@ class ActionModel(nn.Module):
             raise NotImplementedError
         return action, action_dist
     
-    def exploration(self, action: torch.Tensor, itr: int):
-        """
-        :param action: action to take, shape (1,) (if categorical), or (action dim,) (if continuous)
-        :return: action of the same shape passed in, augmented with some noise
-        """
+    def add_exploration(self, action: torch.Tensor, itr: int):
         if self.training:
             expl_amount = self.train_noise
-            if self.expl_decay:  # Linear decay
+            if self.expl_decay:
                 expl_amount = expl_amount - itr / self.expl_decay
             if self.expl_min:
                 expl_amount = max(self.expl_min, expl_amount)
@@ -121,7 +113,10 @@ class ActionModel(nn.Module):
             
         '''for discrete actions'''
         if self.expl_type == 'epsilon_greedy':
-            index = torch.randint(0, self.action_size, action.shape[:-1], device=action.device)
-            action = torch.zeros_like(action)
-            action[..., index] = 1
+            if np.random.uniform(0, 1) < expl_amount:
+                index = torch.randint(0, self.action_size, action.shape[:-1], device=action.device)
+                action = torch.zeros_like(action)
+                action[..., index] = 1
             return action
+
+        raise NotImplementedError

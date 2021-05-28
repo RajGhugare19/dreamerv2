@@ -27,7 +27,6 @@ class TanhBijector(td.Transform):
             torch.clamp(y, -0.99999997, 0.99999997),
             y
         )
-
         y = torch.atanh(y)
         return y
 
@@ -71,4 +70,4 @@ class SampleDist():
         return -torch.mean(logprob, 0)
 
     def sample(self):
-        return self._dist.sample()
+        return self._dist.sample()  
