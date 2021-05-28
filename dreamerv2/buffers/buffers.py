@@ -1,13 +1,9 @@
 import numpy as np 
-import torch 
 import random 
-from typing import Tuple
 from collections import namedtuple, deque
 
-
 Episode = namedtuple('Episode', ['obs', 'act', 'rew', 'nonterms', 'length'])  
 
-Episode = namedtuple('Episode', ['obs', 'act', 'rew', 'nonterms', 'length'])  
 class EpisodicBuffer():
     """
     Stores each episode as a namedtuple in a deque.
@@ -17,14 +13,8 @@ class EpisodicBuffer():
     """
     def __init__(
         self,
-        max_episodes,
-        obs_shape: Tuple[int],
-        action_size: int,
-        obs_type=np.float32,
-        action_type=np.float32,
-        pixels=False,  
-        bits=5, 
-        device="cpu"
+        buffer_config,
+        model_config,
     ):
         """
         :params max_episodes: maximum number of episodes to store in memory
@@ -32,18 +22,17 @@ class EpisodicBuffer():
         :params full: indicates whether the entire buffer is filled with transitions
         :params total_episodes: total episodes stored in the buffer
         """
-        self.max_episodes = max_episodes
-        self.action_size = action_size
-        self.action_dtype = action_type 
-        self.obs_shape = obs_shape
-        self.obs_dtype = obs_type
-        self.bits = bits
-        self.device = device
-        self.pixels = pixels      
+        self.max_episodes = buffer_config['max_episodes']
+        self.bits = buffer_config['bits']
+        self.action_size = model_config['action_size']
+        self.obs_shape = model_config['obs_shape']
+        self.pixels = model_config['pixels']
+        self.action_dtype = np.float32 
+        self.obs_dtype = np.float32
         self.full = False            
         self.total_episodes = 0   
         self._init_episode()
-        self.memory = deque([],maxlen=max_episodes)
+        self.memory = deque([],maxlen=self.max_episodes)
     
     def add(self, obs, act=None, rew=None, done=None):
         self.obs.append(obs)
