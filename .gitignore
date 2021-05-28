@@ -110,6 +110,9 @@ ENV/
 env.bak/
 venv.bak/
 
+# Wandb
+wandb
+
 # Spyder project settings
 .spyderproject
 .spyproject
@@ -130,3 +133,4 @@ dmypy.json
 
 .__pycache__
 .dreamerv2.egg-info
+.vscode
