@@ -1,3 +1,4 @@
+import numpy as np
 import torch 
 import torch.nn as nn 
 import torch.optim as optim
@@ -6,37 +7,52 @@ from torch.distributions.kl import kl_divergence
 
 from dreamerv2.utils.rssm_utils import RSSMContState, get_feat, get_dist, rssm_seq_to_batch, rssm_detach
 from dreamerv2.utils.module_utils import get_parameters, FreezeParameters
-from dreamerv2.utils.algo_utils import lambda_return
+from dreamerv2.utils.algo_utils import lambda_return, compute_return
 
 from dreamerv2.models.action import ActionModel
-from dreamerv2.models.encoder import LinearEncoder 
-from dreamerv2.models.decoder import LinearDecoder, RewardModel, ValueModel
+from dreamerv2.models.dense import DenseModel
 from dreamerv2.models.rssm import RSSM
 
 
 class Trainer(object):
     def __init__(
         self, 
-        model_config,
+        obs_shape, 
+        action_size,
+        deter_size,
+        stoch_size,
+        node_size,
+        embedding_size,
+        action_dist,
+        expl_type,
         training_config,
         buffer,
-        device="cpu"
+        device,
+        encoder_layers=3,
+        decoder_layers=3,
+        reward_layers=3,
+        value_layers=3,
+        discount_layers=3,
+        pixels=False,
     ):
         self.device = device
-        self.RSSM = RSSM(model_config, self.device).to(self.device)
-        self.RewardDecoder = RewardModel(model_config).to(self.device)
-        self.ActionModel = ActionModel(model_config).to(self.device)
-        self.ValueModel = ValueModel(model_config).to(self.device)
-        if not model_config['pixels']:
-            self.ObsEncoder = LinearEncoder(model_config).to(self.device)
-            self.ObsDecoder = LinearDecoder(model_config).to(self.device)
+        self.RSSM = RSSM(action_size, deter_size, stoch_size, node_size, embedding_size, self.device).to(self.device)
+        self.ActionModel = ActionModel(action_size, deter_size, stoch_size, node_size, embedding_size, action_dist, expl_type).to(self.device)
+        self.RewardDecoder = DenseModel((1,), stoch_size+deter_size, reward_layers, node_size).to(self.device)
+        self.ValueModel = DenseModel((1,), stoch_size+deter_size, value_layers, node_size).to(self.device)
+        self.DiscountModel = DenseModel((1,), stoch_size+deter_size, discount_layers, node_size).to(self.device)
+        if not pixels:
+            self.ObsEncoder = DenseModel(embedding_size, int(np.prod(obs_shape)), encoder_layers, node_size).to(self.device)
+            self.ObsDecoder = DenseModel(obs_shape, stoch_size+deter_size, decoder_layers, node_size).to(self.device)
         else:
             raise NotImplementedError
         self.buffer = buffer
-        self.action_size = model_config['action_size']
-        self.pixels = model_config['pixels']
+        self.action_size = action_size
+        self.pixels = pixels
         self.seq_len = training_config['seq_len']
         self.batch_size = training_config['batch_size']
+        self.collect_intervals = training_config['collect_intervals']
+        self.seed_episodes = training_config['seed_episodes']
         self.model_lr = training_config['model_learning_rate']
         self.actor_lr = training_config['actor_learning_rate']
         self.value_lr = training_config['value_learning_rate']
@@ -45,13 +61,11 @@ class Trainer(object):
         self.horizon = training_config['horizon']
         self.kl_scale = training_config['kl_scale']
         self.grad_clip_norm = training_config['grad_clip_norm']
-        
+        self.free_nats = training_config['free_nats']
         self.optim_initialize()
-        if training_config['free_nats'] is not None:
-            self.free_nats = torch.full((1,), training_config['free_nats']).to(self.device)
         
     def optim_initialize(self):
-        self.world_list = [self.ObsEncoder, self.RSSM, self.RewardDecoder, self.ObsDecoder]
+        self.world_list = [self.ObsEncoder, self.RSSM, self.RewardDecoder, self.ObsDecoder, self.DiscountModel]
         self.actor_list = [self.ActionModel]
         self.value_list = [self.ValueModel]
         self.actorcritic_list = [self.ActionModel, self.ValueModel]
@@ -59,167 +73,173 @@ class Trainer(object):
         self.actor_optimizer = optim.Adam(get_parameters(self.actor_list), self.actor_lr)
         self.value_optimizer = optim.Adam(get_parameters(self.value_list), self.value_lr)
     
-    def train_batch(self, metrics):
-        """ (seq_len, batch_size, *dims) """
-        obs, actions, rewards, nonterms = self.buffer.sample(self.seq_len, self.batch_size)
-        obs = torch.tensor(obs).to(self.device)
-        actions = torch.tensor(actions).to(self.device)
-        rewards = torch.tensor(rewards).to(self.device)
-        obs_loss, reward_loss, kl_loss, posterior, prior = self.representation_loss(obs, actions, rewards, nonterms)
-        
-        #representation_learning Learning
-        model_loss = obs_loss + reward_loss + kl_loss*self.kl_scale
-        self.model_optimizer.zero_grad()
-        model_loss.backward()
-        nn.utils.clip_grad_norm_(get_parameters(self.world_list), self.grad_clip_norm, norm_type=2)
-        self.model_optimizer.step()
-        
-        with torch.no_grad():
-            batched_posterior = rssm_detach(rssm_seq_to_batch(posterior, self.batch_size, self.seq_len))
-        with FreezeParameters(self.world_list):
-            imag_rssm_states, _ = self.RSSM.rollout_imagination(self.horizon, self.ActionModel, batched_posterior)
-        imag_feat = get_feat(imag_rssm_states)
-        with FreezeParameters(self.world_list+self.value_list):
-            imag_reward = self.RewardDecoder(imag_feat)
-            imag_value = self.ValueModel(imag_feat)
-        
-        returns = lambda_return(imag_reward, imag_value, imag_value[-1], self.discount, self.lambda_)
-        actor_loss = self._actor_loss(returns)
-        with torch.no_grad():
-            _imag_feat = imag_feat.detach()
-            value_target = returns.detach()
-        value_pred = self.ValueModel(_imag_feat)        
-        value_loss = self._value_loss(value_pred, value_target)
-        
-        #Behaviour Learning
-        self.actor_optimizer.zero_grad()
-        self.value_optimizer.zero_grad()
-        
-        actor_loss.backward()
-        value_loss.backward()
-        
-        nn.utils.clip_grad_norm_(self.ActionModel.parameters(), self.grad_clip_norm, norm_type=2)
-        nn.utils.clip_grad_norm_(self.ValueModel.parameters(), self.grad_clip_norm, norm_type=2)
-        
-        self.actor_optimizer.step()
-        self.value_optimizer.step()
-        
-        with torch.no_grad():
-            prior_dist = get_dist(prior)
-            posterior_dist = get_dist(posterior)
-            residual_variance = (torch.var(returns-value_pred)/torch.var(returns)).item()
-            prior_ent = torch.mean(prior_dist.entropy())
-            post_ent = torch.mean(posterior_dist.entropy())
-        
-        metrics['train_iters'] += 1
-        metrics['actor_loss'] = actor_loss.item()
-        metrics['value_loss'] = value_loss.item()
-        metrics['obs_loss'] = obs_loss.item()
-        metrics['kl_loss'] = reward_loss.item()
-        metrics['reward_loss'] = kl_loss.item()
-        metrics['prior_entropy'] = prior_ent
-        metrics['posterior_entropy'] = post_ent
-        metrics['residual_variance'] = residual_variance
-
-        return metrics
+    def collect_seed_episodes(self, env):
+        for i in range(self.seed_episodes):
+            s, done  = env.reset(), False 
+            while not done:
+                a = env.action_space.sample()
+                ns, r, done, _ = env.step(a)
+                if done:
+                    self.buffer.add(s,a,r,done,ns)
+                else:
+                    self.buffer.add(s,a,r,done)
+                    s = ns
 
     def env_interact(self, env, metrics):
+        obs, score = env.reset(), 0
+        done = False
+        embed = self.ObsEncoder(torch.tensor(obs, dtype=torch.float32).unsqueeze(0).to(self.device))
+        prev_rssmstate = self.RSSM._init_rssm_state(1)
+        prev_action = torch.zeros(1, self.action_size).to(self.device)
+        while not done:
+            _, posterior_rssm_state = self.RSSM.rssm_observe(embed, prev_action, prev_rssmstate)
+            action, action_dist = self.ActionModel(posterior_rssm_state)
+            action = self.ActionModel.add_exploration(action, metrics['train_iters'])
+            next_obs, rew, done, _ = env.step(action.squeeze(0).detach().cpu().numpy())
+            score += rew
+            metrics['train_iters'] += 1
+            if done:
+                self.buffer.add(obs, action.squeeze(0).detach().cpu().numpy(), rew, done, next_obs)
+            else:
+                self.buffer.add(obs, action.squeeze(0).detach().cpu().numpy(), rew, done)
+                obs = next_obs
+            embed = self.ObsEncoder(torch.tensor(obs, dtype=torch.float32).unsqueeze(0).to(self.device))
+            prev_rssmstate = posterior_rssm_state
+            prev_action = action
+        metrics['train_episodes'] += 1
+        metrics['train_rewards'] = score
+        metrics['running_rewards'] = 0.9*metrics['running_rewards'] + 0.1*score
+        return metrics        
 
-        with torch.no_grad():
-            obs, total_reward, t = env.reset(), 0, 0
-            self.buffer.add(obs)
-            done = False 
-            
-            obs_embed = self.ObsEncoder(torch.tensor(obs, dtype=torch.float32).unsqueeze(0).to(self.device))
-            prev_rssmstate = self.RSSM._init_rssm_state(batch_size = 1)
-            prev_action = torch.zeros(1, self.action_size).to(self.device)
-            while not done:
-                _, posterior_rssm_state = self.RSSM.rssm_observe(obs_embed, prev_action, prev_rssmstate)
-                action, action_dist = self.ActionModel(posterior_rssm_state)
-                action = self.ActionModel.add_exploration(action, metrics['env_steps']+t)
-                obs, rew, done, _ = env.step(action.squeeze(0).cpu().numpy())
-                env.render()
-                total_reward += rew
-                self.buffer.add(obs, action.squeeze(0).cpu().numpy(), rew, done)
-                obs_embed = self.ObsEncoder(torch.tensor(obs, dtype=torch.float32).unsqueeze(0).to(self.device))
-                prev_rssmstate = posterior_rssm_state
-                prev_action = action
-            env.close()
-            metrics['train_episodes'] += 1
-            metrics['env_steps'] += t
-            print('return', total_reward)
-        return metrics
-
-    def seed_episodes(self, env, seed_episodes, metrics):
-        for s in range(1, seed_episodes+1):
-            obs, done, t = env.reset(), False, 0 
-            self.buffer.add(obs)
-            while not done:
-                action = env.action_space.sample()
-                obs, rew, done, _ = env.step(action)
-                t += 1
-                self.buffer.add(obs, action, rew, done)
-            metrics['train_episodes'] += 1
-            metrics['env_steps'] += t
-
-    def representation_loss(self, obs, actions, rewards, nonterms):
-        """embedded observation: (seq_len, batch_size, embedding_size) """
-        obs_embed = self.ObsEncoder(obs)
-        
-        init_rssmstate = self.RSSM._init_rssm_state(self.batch_size) 
-        prior, posterior = self.RSSM.rollout_observation(self.seq_len, obs_embed, actions, init_rssmstate)
-        post_modelstate = get_feat(posterior)
-        
+    def train_batch(self, train_metrics):
         """ (seq_len, batch_size, *dims) """
-        decoded_obs = self.ObsDecoder(post_modelstate)
-        decoded_rewards = self.RewardDecoder(post_modelstate)
+        actor_l = []
+        value_l = []
+        obs_l = []
+        model_l = []
+        reward_l = []
+        prior_ent_l = []
+        post_ent_l = []
+        kl_l = []
+        pcont_l = []
+        for i in range(self.collect_intervals):
+            obs, actions, rewards, terms = self.buffer.sample(self.seq_len, self.batch_size)
+            obs = torch.tensor(obs).to(self.device)                         #t to t+seq_len   
+            actions = torch.tensor(actions).to(self.device)                 #t-1 to t-1+seq_len
+            rewards = torch.tensor(rewards).to(self.device).unsqueeze(-1)   #t-1 to t-1+seq_len
+            nonterms = torch.tensor(1-terms).to(self.device).unsqueeze(-1)  #t-1 to t-1+seq_len
+            #obs = obs/10 - 0.5
+            model_loss, kl_loss, obs_loss, reward_loss, pcont_loss, prior_dist, post_dist, posterior = self.representation_loss(obs, actions, rewards, nonterms)
+            
+            self.model_optimizer.zero_grad()
+            model_loss.backward()
+            grad_norm_model = torch.nn.utils.clip_grad_norm_(get_parameters(self.world_list),100)
+            self.model_optimizer.step()
+
+            actor_loss, value_loss = self.actorcritc_loss(posterior)
+            self.actor_optimizer.zero_grad()
+            self.value_optimizer.zero_grad()
+
+            actor_loss.backward()
+            value_loss.backward()
+
+            grad_norm_actor = torch.nn.utils.clip_grad_norm_(get_parameters(self.actor_list), 100)
+            grad_norm_value = torch.nn.utils.clip_grad_norm_(get_parameters(self.value_list), 100)
+
+            self.actor_optimizer.step()
+            self.value_optimizer.step()
+
+            with torch.no_grad():
+                prior_ent = torch.mean(prior_dist.entropy())
+                post_ent = torch.mean(post_dist.entropy())
+
+            prior_ent_l.append(prior_ent.item())
+            post_ent_l.append(post_ent.item())
+            actor_l.append(actor_loss.item())
+            value_l.append(value_loss.item())
+            obs_l.append(obs_loss.item())
+            model_l.append(model_loss.item())
+            reward_l.append(reward_loss.item())
+            kl_l.append(kl_loss.item())
+            pcont_l.append(pcont_loss.item())
+
         
-        prior_dist = get_dist(prior)
-        posterior_dist = get_dist(posterior)
+        train_metrics['model_loss'] = np.mean(model_l)
+        train_metrics['kl_loss']=np.mean(kl_l)
+        train_metrics['reward_loss']=np.mean(reward_l)
+        train_metrics['obs_loss']=np.mean(obs_l)
+        train_metrics['value_loss']=np.mean(value_l)
+        train_metrics['actor_loss']=np.mean(actor_l)
+        train_metrics['prior_entropy']=np.mean(prior_ent_l)
+        train_metrics['posterior_entropy']=np.mean(post_ent_l)
+        train_metrics['pcont_loss']=np.mean(pcont_l)
         
-        obs_loss = self._observation_loss(obs, decoded_obs)
-        reward_loss = self._reward_loss(rewards[1:], decoded_rewards[:-1])
-        kl_loss = self._kl_loss(prior_dist, posterior_dist)
+        return train_metrics
 
-        return obs_loss, reward_loss, kl_loss, posterior, prior
+    def actorcritc_loss(self, posterior):
+        with torch.no_grad():
+            #last posterior in every sequence could be terminal posterior
+            batched_posterior = rssm_detach(rssm_seq_to_batch(posterior, self.batch_size, self.seq_len-1))
+        with FreezeParameters(self.world_list):
+            imag_rssm_states,_ = self.RSSM.rollout_imagination(self.horizon, self.ActionModel, batched_posterior)
+        imag_modelstates = get_feat(imag_rssm_states)
+        with FreezeParameters(self.world_list+self.value_list):
+            imag_reward = self.RewardDecoder(imag_modelstates)
+            imag_reward_dist = td.independent.Independent(td.Normal(imag_reward,1),1)
+            imag_reward = imag_reward_dist.mean
+            imag_value = self.ValueModel(imag_modelstates)
+            imag_value_dist = td.independent.Independent(td.Normal(imag_value,1),1)
+            imag_value = imag_value_dist.mean
 
-    def _observation_loss(self, obs, decoded_obs):
-        if not self.pixels:
-            obs_dist = td.independent.Independent(td.Normal(decoded_obs,1),1)
-            obs_loss = -torch.mean(obs_dist.log_prob(obs))
-        else:
-            raise NotImplementedError
-        return obs_loss
-    
-    def _reward_loss(self, rewards, decoded_rewards):
-        if not self.pixels:
-            reward_dist = td.independent.Independent(td.Normal(decoded_rewards,1),1)
-            reward_loss = -torch.mean(reward_dist.log_prob(rewards.unsqueeze(-1)))
-        else:
-            raise NotImplementedError
-        return reward_loss
-    
-    def _kl_loss(self, prior_dist, posterior_dist):
+        with FreezeParameters([self.DiscountModel]):
+            discount_pred = self.DiscountModel(imag_modelstates)
+            discount_dist = td.independent.Independent(td.Bernoulli(logits=discount_pred),1)
+            discount_arr = discount_dist.mean
+        lambda_returns = compute_return(imag_reward[:-1], imag_value[:-1], discount_arr[:-1], bootstrap=imag_value[-1], lambda_=self.lambda_)    
+        #lambda_returns = lambda_return(imag_reward, imag_value, imag_value[-1], self.discount, self.lambda_) 
+        discount_arr = torch.cat([torch.ones_like(discount_arr[:1]), discount_arr[1:]])
+        discount = torch.cumprod(discount_arr[:-1], 0)
+        actor_loss = -torch.mean(discount * lambda_returns)
+        #actor_loss = -torch.mean(lambda_returns)
+        with torch.no_grad():
+            value_modelstates = imag_modelstates[:-1].detach()
+            value_discount = discount.detach()
+            value_target = lambda_returns.detach()
 
-        if self.free_nats is not None:
-            div = torch.mean(kl_divergence(posterior_dist, prior_dist))
-            return torch.max(
-                kl_divergence(posterior_dist, prior_dist), self.free_nats
-            ).mean(dim=(0, 1))   
-        else:
-            return kl_divergence(posterior_dist, prior_dist).mean(dim=(0,1))       
-    
-    def _actor_loss(self, returns):
-        action_loss = -torch.mean(returns)
-        return action_loss
-    
-    def _value_loss(self, value_pred, value_target):
+        value_pred = self.ValueModel(value_modelstates) 
         value_dist = td.independent.Independent(td.Normal(value_pred,1),1)
         log_prob = value_dist.log_prob(value_target)
-        value_loss = -torch.mean(log_prob)
-        return value_loss
+        value_loss = -torch.mean(value_discount*log_prob.unsqueeze(-1))
+        #value_loss = 0.5*torch.sum(torch.mean((value_pred-value_target)**2, dim=1))
+        return actor_loss, value_loss
 
-    
+    def representation_loss(self, obs, actions, rewards, nonterms):
+        embed = self.ObsEncoder(obs)
+        prev_rssm_state = self.RSSM._init_rssm_state(self.batch_size)
+        prior, posterior = self.RSSM.rollout_observation(self.seq_len, embed, actions, prev_rssm_state)
+        post_modelstate = get_feat(posterior)
+        decoded_obs = self.ObsDecoder(post_modelstate)
+        decoded_rewards = self.RewardDecoder(post_modelstate)
+        decoded_pcont = self.DiscountModel(post_modelstate)
+
+        obs_dist = td.independent.Independent(td.Normal(decoded_obs,1),1)
+        obs_loss = -torch.mean(obs_dist.log_prob(obs))
+
+        reward_dist = td.independent.Independent(td.Normal(decoded_rewards[:-1],1),1)
+        reward_loss = -torch.mean(reward_dist.log_prob(rewards[1:]))
+
+        pcont_target = nonterms.float()
+        pcont_dist = td.independent.Independent(td.Bernoulli(logits=decoded_pcont[:-1]),1)
+        pcont_loss = -torch.mean(pcont_dist.log_prob(pcont_target[1:]))
+        
+        prior_dist = get_dist(prior)
+        post_dist = get_dist(posterior)
+        div = torch.mean(torch.distributions.kl.kl_divergence(post_dist, prior_dist))
+        #div = torch.max(div, div.new_full(div.size(), self.free_nats))
+        model_loss = self.kl_scale * div + reward_loss + obs_loss + 10*pcont_loss
+
+        return model_loss, div, obs_loss, reward_loss, pcont_loss, prior_dist, post_dist, posterior
+
     def get_save_dict(self):
         return {
             "RSSM": self.RSSM.state_dict(),

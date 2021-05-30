@@ -7,18 +7,22 @@ from dreamerv2.utils.rssm_utils import stack_states, RSSMContState
 class RSSM(nn.Module):
     def __init__(
         self,
-        model_config,
+        action_size,
+        deter_size,
+        stoch_size,
+        node_size,
+        embedding_size,
         device,
         act_fn=nn.ELU,  
         min_std=0.1, 
     ):
         super().__init__()
         self.device = device
-        self.action_size = model_config['action_size']
-        self.deter_size = model_config['deter_size']
-        self.stoch_size = model_config['stoch_size']
-        self.node_size = model_config['node_size']
-        self.embedding_size = model_config['embedding_size']
+        self.action_size = action_size
+        self.deter_size = deter_size
+        self.stoch_size = stoch_size
+        self.node_size = node_size
+        self.embedding_size = embedding_size
         self.min_std = min_std
 
         self.act_fn = act_fn

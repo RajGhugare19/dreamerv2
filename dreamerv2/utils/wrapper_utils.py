@@ -135,3 +135,53 @@ class NormalizedObs(gym.core.Wrapper):
         self.ret = np.zeros(())
         obs = self.env.reset()
         return self._obfilt(obs)
+
+class SimpleGrid(gym.core.ObservationWrapper):
+    
+    def __init__(self,env):
+        super().__init__(env)
+        img_shape = env.observation_space.spaces['image'].shape
+        self.observation_space = gym.spaces.Box(
+            low=0,
+            high=255,
+            shape=(img_shape[0]*img_shape[1],),
+            dtype='uint8'
+        )
+        self.action_space = gym.spaces.Discrete(3)
+
+    def observation(self, obs):
+        state  = obs['image'][:,:,0].reshape(-1)
+        return state
+
+
+class SimpleOneHotPartialObsWrapper(gym.core.ObservationWrapper):
+    """for minigrids: Empty, FourRooms """
+    def __init__(self, env, tile_size=8):
+        super().__init__(env)
+
+        self.tile_size = tile_size
+        obs_shape = env.observation_space['image'].shape
+        # Number of bits per cell
+        num_bits = 3 #empty, wall, goal
+
+        self.OBJECTidx_TO_SIMPLEidx = {
+            1 : 0,
+            2 : 1,
+            8 : 2,
+        }
+        
+        self.observation_space.spaces["image"] = gym.spaces.Box(
+            low=0,
+            high=255,
+            shape=(obs_shape[0]*obs_shape[1], num_bits),
+            dtype='uint8'
+        )
+        self.action_space = gym.spaces.Discrete(3)
+        
+    def observation(self, obs):
+        img =  obs['image'][:,:,0].reshape(-1)
+        out = np.zeros(self.observation_space.spaces['image'].shape, dtype='uint8')
+        for i,obj in enumerate(img):
+            out[i, self.OBJECTidx_TO_SIMPLEidx[obj]] = 1
+        
+        return out.reshape(-1)

@@ -9,8 +9,14 @@ from dreamerv2.utils import get_feat
 
 class ActionModel(nn.Module):
     def __init__(
-        self, 
-        model_config,
+        self,
+        action_size,
+        deter_size,
+        stoch_size,
+        node_size,
+        embedding_size, 
+        action_dist,
+        expl_type,
         act_fn=nn.ELU,
         mean_scale=5, 
         min_std=1e-4, 
@@ -27,19 +33,19 @@ class ActionModel(nn.Module):
         """
         super().__init__()
         self.act_fn = act_fn
-        self.action_size = model_config['action_size']
-        self.deter_size = model_config['deter_size']
-        self.stoch_size = model_config['stoch_size']
-        self.node_size = model_config['node_size']
-        self.embedding_size = model_config['embedding_size']
-        self.dist = model_config['action_dist']
+        self.action_size =action_size
+        self.deter_size = deter_size
+        self.stoch_size = stoch_size
+        self.node_size = node_size
+        self.embedding_size = embedding_size
+        self.dist = action_dist
         self._mean_scale = mean_scale
         self._init_std = init_std
         self._min_std = min_std
         self.raw_init_std = np.log(np.exp(self._init_std) - 1)
         self.train_noise = train_noise
         self.eval_noise = eval_noise
-        self.expl_type = model_config['expl_type']
+        self.expl_type = expl_type
         self.expl_min = expl_min
         self.expl_decay = expl_decay
         self.model = self._build_model()

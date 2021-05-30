@@ -1,107 +1,98 @@
 import numpy as np 
 import random 
 from collections import namedtuple, deque
+from typing import Optional, Tuple
 
-Episode = namedtuple('Episode', ['obs', 'act', 'rew', 'nonterms', 'length'])  
+Episode = namedtuple('Episode', ['observation', 'action', 'reward', 'terminal', 'length'])  
 
 class EpisodicBuffer():
     """
-    Stores each episode as a namedtuple in a deque.
-    Each episode is a namedtuple containing numpy arrays
-    If seq len is smaller than sampled episode, the sample() will throw an error 
-    operating under the assumption that episode_length > sequence_length
+    :params total_episodes: maximum no of episodes capacity  
     """
     def __init__(
         self,
-        buffer_config,
-        model_config,
+        total_episodes,
+        obs_shape: Tuple[int],
+        action_size: int,
+        obs_type=np.float32,
+        action_type=np.float32,
+        max_trajectory_length: Optional[int] = None,
+    ):
+        self.total_episodes = total_episodes
+        self.obs_shape = obs_shape
+        self.action_size = action_size
+        self.obs_type = obs_type
+        self.action_type = action_type
+        self.max_trajectory_length = max_trajectory_length
+        self.buffer = deque([],maxlen=total_episodes)
+        self._full = False
+        self._episode_cnt = 0
+        self._init_episode()
+    
+    def add(
+        self,
+        obs: np.ndarray,
+        action: np.ndarray,
+        reward: float,
+        done: bool,
+        last_obs: Optional[np.ndarray] = None
     ):
         """
-        :params max_episodes: maximum number of episodes to store in memory
-        :params pixels: indicates whether observations are images or not
-        :params full: indicates whether the entire buffer is filled with transitions
-        :params total_episodes: total episodes stored in the buffer
+        obs.shape: (*obs_shape,)
+        action.shape: (action_size,)
         """
-        self.max_episodes = buffer_config['max_episodes']
-        self.bits = buffer_config['bits']
-        self.action_size = model_config['action_size']
-        self.obs_shape = model_config['obs_shape']
-        self.pixels = model_config['pixels']
-        self.action_dtype = np.float32 
-        self.obs_dtype = np.float32
-        self.full = False            
-        self.total_episodes = 0   
-        self._init_episode()
-        self.memory = deque([],maxlen=self.max_episodes)
-    
-    def add(self, obs, act=None, rew=None, done=None):
-        self.obs.append(obs)
-        if done==None:
-            act = np.zeros(self.action_size, dtype=self.action_dtype)
-            rew = 0.0
-            done = False 
-        self.act.append(act)
-        self.rew.append(rew)
-        self.nonterms.append(not done)
+        self.observation.append(obs)
+        self.action.append(action)
+        self.reward.append(reward)
+        self.terminal.append(done)
+        
         if done:
+            assert last_obs is not None
+            self.observation.append(last_obs)
             self.add_episode()
-            
-    def add_episode(self):
-        assert self.nonterms[-1] == False
-        e = Episode(*self._episode_toarray(), len(self.obs))
-        self.memory.append(e)
-        self.total_episodes += 1
-        if self.total_episodes == self.max_episodes:
-            self.full = True
-        self._init_episode()
     
     def sample(self, seq_len, batch_size):
-        episode_list = random.choices(self.memory, k=batch_size)
-        obs_batch = np.zeros([seq_len, batch_size, *self.obs_shape], dtype=self.obs_dtype)
-        act_batch = np.zeros([seq_len, batch_size, self.action_size], dtype=self.action_dtype)
-        rew_batch = np.zeros([seq_len, batch_size], dtype=np.float32)
-        nonterm_batch = np.zeros([seq_len, batch_size], dtype=bool)
-        for ind,episode in enumerate(episode_list):
-            obs_batch[:,ind], act_batch[:,ind], rew_batch[:,ind], nonterm_batch[:,ind] = self._sample_seq(episode, seq_len)
-        return obs_batch, act_batch, rew_batch , nonterm_batch
-    
-    def sample_batch_first(self, seq_len, batch_size):
-        episode_list = random.choices(self.memory, k=batch_size)
-        obs_batch = np.zeros([batch_size, seq_len, *self.obs_shape], dtype=self.obs_dtype)
-        act_batch = np.zeros([batch_size, seq_len, self.action_size], dtype=self.action_dtype)
-        rew_batch = np.zeros([batch_size, seq_len], dtype=np.float32)
-        nonterm_batch = np.zeros([batch_size, seq_len], dtype=bool)
-        for ind,episode in enumerate(episode_list):
-                obs_batch[ind,:], act_batch[ind,:], rew_batch[ind,:], nonterm_batch[ind,:] = self._sample_seq(episode, seq_len)
-        return obs_batch, act_batch, rew_batch , nonterm_batch
-    
-    def _episode_toarray(self):
-        o = np.stack(self.obs, axis=0)
-        a = np.stack(self.act, axis=0)
-        r = np.stack(self.rew, axis=0)
-        nt = np.stack(self.nonterms, axis=0)
-        return o,a,r,nt
+        episode_list = random.choices(self.buffer, k=batch_size)
+        obs_batch = np.empty([seq_len, batch_size, *self.obs_shape], dtype=self.obs_type)
+        act_batch = np.empty([seq_len, batch_size, self.action_size], dtype=self.action_type)
+        rew_batch = np.empty([seq_len, batch_size], dtype=np.float32)
+        term_batch = np.empty([seq_len, batch_size], dtype=bool)
+        for ind, episode in enumerate(episode_list):
+            obs_batch[:,ind], act_batch[:,ind], rew_batch[:,ind], term_batch[:,ind] = self._sample_seq(episode, seq_len)
+        return obs_batch, act_batch, rew_batch , term_batch
     
     def _sample_seq(self, episode, seq_len):
         assert episode.length>=seq_len
-        s = min(np.random.choice(episode.length),episode.length-seq_len)
+        s = min(np.random.choice(episode.length), episode.length-seq_len)
         return (
-                np.array(episode.obs)[s:s+seq_len], 
-                np.array(episode.act)[s:s+seq_len], 
-                np.array(episode.rew)[s:s+seq_len], 
-                np.array(episode.nonterms)[s:s+seq_len]
+                episode.observation[s:s+seq_len], 
+                episode.action[s:s+seq_len], 
+                episode.reward[s:s+seq_len], 
+                episode.terminal[s:s+seq_len]
             )
-        
+    
+    def add_episode(self):
+        assert self.terminal[-1] == True
+        e = Episode(*self._episode_to_array(), len(self.terminal))
+        self.buffer.append(e)
+        self._episode_cnt += 1
+        if self._episode_cnt == self.total_episodes:
+            self.full = True 
+        self._init_episode()
+    
     def _init_episode(self):
-        self.obs = [] 
-        self.act = [] 
-        self.rew = []
-        self.nonterms = []
-        
+        self.observation = [] 
+        self.action = [np.zeros(self.action_size, dtype=self.action_type)] 
+        self.reward = [0.0]
+        self.terminal = [False]
+    
+    def _episode_to_array(self):
+        o = np.stack(self.observation, axis=0)
+        a = np.stack(self.action, axis=0)
+        r = np.stack(self.reward, axis=0)
+        nt = np.stack(self.terminal, axis=0)
+        return o,a,r,nt
+    
     @property
-    def current_size(self):
-        raise NotImplementedError
-
-    @property
-    def current_episodes(self):
-        return self.total_episodes
+    def episode_count(self):
+        return self._episode_cnt

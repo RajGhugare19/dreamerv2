@@ -3,12 +3,19 @@ import torch.nn as nn
 
 
 class DenseModel(nn.Module):
-    def __init__(self, model_config, activation=nn.ELU):
+    def __init__(
+            self, 
+            output_shape, 
+            input_size, 
+            layers, 
+            node_size, 
+            activation=nn.ELU
+        ):
         super().__init__()
-        self._output_shape = model_config['output_shape']
-        self._input_size = model_config['input_size']
-        self._layers = model_config['layers']
-        self._node_size = model_config['node_size']
+        self._output_shape = output_shape
+        self._input_size = input_size
+        self._layers = layers
+        self._node_size = node_size
         self.activation = activation
         self.model = self.build_model()
 
