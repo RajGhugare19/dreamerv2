@@ -21,10 +21,10 @@ class ActionModel(nn.Module):
         mean_scale=5, 
         min_std=1e-4, 
         init_std=5,
-        train_noise=0.5,
+        train_noise=0.4,
         eval_noise=0,
         expl_min=0.01,
-        expl_decay=10000,
+        expl_decay=20000,
     ):
         """
         :params deter_size : size of deterministic recurrent states

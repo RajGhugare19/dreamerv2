@@ -18,9 +18,10 @@ training_config = dict(
     discount = 0.99,
     lambda_ = 0.95,
     kl_scale = 0.1,
+    pcont_scale = 10,
     seed_episodes = 5,
     train_episode = 1000,
-    collect_intervals = 50,
+    collect_intervals = 100,
     batch_size = 50,
     seq_len = 10, 
     horizon = 8,
@@ -44,10 +45,10 @@ action_dist = 'one_hot'
 expl_type = 'epsilon_greedy'
 
 device = torch.device('cuda')
-env = gym.make(env_name)
-env = OneHotAction(SimpleOneHotPartialObsWrapper(env))
+#env = gym.make(env_name)
+#env = OneHotAction(SimpleOneHotPartialObsWrapper(env))
 #env = OneHotAction(SimpleGrid(env))
-
+#env = gym.make('CartPole')
 buffer = EpisodicBuffer(max_episodes, obs_shape, action_size)
 trainer = Trainer(obs_shape, action_size, deter_size, stoch_size, node_size, embedding_size, action_dist, expl_type, training_config, buffer, device)
 
@@ -70,6 +71,8 @@ metrics = dict(
 with wandb.init(project='dreamer', config=training_config):
     trainer.collect_seed_episodes(env)
     for episode in range(1,training_config['train_episode']):
+        if episode%2 == 0:
+            trainer.update_target()
         metrics = trainer.train_batch(metrics)
         metrics = trainer.env_interact(env, metrics)
         wandb.log(metrics, step=metrics['train_iters'])

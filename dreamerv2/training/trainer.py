@@ -1,9 +1,7 @@
 import numpy as np
 import torch 
-import torch.nn as nn 
 import torch.optim as optim
 import torch.distributions as td
-from torch.distributions.kl import kl_divergence
 
 from dreamerv2.utils.rssm_utils import RSSMContState, get_feat, get_dist, rssm_seq_to_batch, rssm_detach
 from dreamerv2.utils.module_utils import get_parameters, FreezeParameters
@@ -38,14 +36,17 @@ class Trainer(object):
         self.device = device
         self.RSSM = RSSM(action_size, deter_size, stoch_size, node_size, embedding_size, self.device).to(self.device)
         self.ActionModel = ActionModel(action_size, deter_size, stoch_size, node_size, embedding_size, action_dist, expl_type).to(self.device)
-        self.RewardDecoder = DenseModel((1,), stoch_size+deter_size, reward_layers, node_size).to(self.device)
-        self.ValueModel = DenseModel((1,), stoch_size+deter_size, value_layers, node_size).to(self.device)
-        self.DiscountModel = DenseModel((1,), stoch_size+deter_size, discount_layers, node_size).to(self.device)
+        self.RewardDecoder = DenseModel((1,), stoch_size+deter_size, reward_layers, node_size, dist='normal').to(self.device)
+        self.ValueModel = DenseModel((1,), stoch_size+deter_size, value_layers, node_size, dist='normal').to(self.device)
+        self.TargetValueModel = DenseModel((1,), stoch_size+deter_size, value_layers, node_size, dist='normal').to(self.device).eval()
+        self.TargetValueModel.load_state_dict(self.ValueModel.state_dict())
+        self.DiscountModel = DenseModel((1,), stoch_size+deter_size, discount_layers, node_size, dist='binary').to(self.device)
         if not pixels:
             self.ObsEncoder = DenseModel(embedding_size, int(np.prod(obs_shape)), encoder_layers, node_size).to(self.device)
-            self.ObsDecoder = DenseModel(obs_shape, stoch_size+deter_size, decoder_layers, node_size).to(self.device)
+            self.ObsDecoder = DenseModel(obs_shape, stoch_size+deter_size, decoder_layers, node_size, dist='normal').to(self.device)
         else:
             raise NotImplementedError
+
         self.buffer = buffer
         self.action_size = action_size
         self.pixels = pixels
@@ -60,8 +61,8 @@ class Trainer(object):
         self.lambda_ = training_config['lambda_']
         self.horizon = training_config['horizon']
         self.kl_scale = training_config['kl_scale']
+        self.pcont_scale = training_config['pcont_scale']
         self.grad_clip_norm = training_config['grad_clip_norm']
-        self.free_nats = training_config['free_nats']
         self.optim_initialize()
         
     def optim_initialize(self):
@@ -111,6 +112,9 @@ class Trainer(object):
         metrics['running_rewards'] = 0.9*metrics['running_rewards'] + 0.1*score
         return metrics        
 
+    def update_target(self):
+        self.TargetValueModel.load_state_dict(self.ValueModel.state_dict())
+
     def train_batch(self, train_metrics):
         """ (seq_len, batch_size, *dims) """
         actor_l = []
@@ -122,18 +126,19 @@ class Trainer(object):
         post_ent_l = []
         kl_l = []
         pcont_l = []
+
         for i in range(self.collect_intervals):
             obs, actions, rewards, terms = self.buffer.sample(self.seq_len, self.batch_size)
             obs = torch.tensor(obs).to(self.device)                         #t to t+seq_len   
             actions = torch.tensor(actions).to(self.device)                 #t-1 to t-1+seq_len
             rewards = torch.tensor(rewards).to(self.device).unsqueeze(-1)   #t-1 to t-1+seq_len
             nonterms = torch.tensor(1-terms).to(self.device).unsqueeze(-1)  #t-1 to t-1+seq_len
-            #obs = obs/10 - 0.5
+
             model_loss, kl_loss, obs_loss, reward_loss, pcont_loss, prior_dist, post_dist, posterior = self.representation_loss(obs, actions, rewards, nonterms)
             
             self.model_optimizer.zero_grad()
             model_loss.backward()
-            grad_norm_model = torch.nn.utils.clip_grad_norm_(get_parameters(self.world_list),100)
+            grad_norm_model = torch.nn.utils.clip_grad_norm_(get_parameters(self.world_list),self.grad_clip_norm)
             self.model_optimizer.step()
 
             actor_loss, value_loss = self.actorcritc_loss(posterior)
@@ -143,8 +148,8 @@ class Trainer(object):
             actor_loss.backward()
             value_loss.backward()
 
-            grad_norm_actor = torch.nn.utils.clip_grad_norm_(get_parameters(self.actor_list), 100)
-            grad_norm_value = torch.nn.utils.clip_grad_norm_(get_parameters(self.value_list), 100)
+            grad_norm_actor = torch.nn.utils.clip_grad_norm_(get_parameters(self.actor_list), self.grad_clip_norm)
+            grad_norm_value = torch.nn.utils.clip_grad_norm_(get_parameters(self.value_list), self.grad_clip_norm)
 
             self.actor_optimizer.step()
             self.value_optimizer.step()
@@ -178,39 +183,38 @@ class Trainer(object):
 
     def actorcritc_loss(self, posterior):
         with torch.no_grad():
-            #last posterior in every sequence could be terminal posterior
+            #last posterior in every sequence could be terminal posterior => seq_len-1
             batched_posterior = rssm_detach(rssm_seq_to_batch(posterior, self.batch_size, self.seq_len-1))
+        
         with FreezeParameters(self.world_list):
             imag_rssm_states,_ = self.RSSM.rollout_imagination(self.horizon, self.ActionModel, batched_posterior)
         imag_modelstates = get_feat(imag_rssm_states)
-        with FreezeParameters(self.world_list+self.value_list):
-            imag_reward = self.RewardDecoder(imag_modelstates)
-            imag_reward_dist = td.independent.Independent(td.Normal(imag_reward,1),1)
+        
+        with FreezeParameters(self.world_list+self.value_list+[self.TargetValueModel]):
+            imag_reward_dist = self.RewardDecoder(imag_modelstates)
             imag_reward = imag_reward_dist.mean
-            imag_value = self.ValueModel(imag_modelstates)
-            imag_value_dist = td.independent.Independent(td.Normal(imag_value,1),1)
+            imag_value_dist = self.TargetValueModel(imag_modelstates)
             imag_value = imag_value_dist.mean
 
         with FreezeParameters([self.DiscountModel]):
-            discount_pred = self.DiscountModel(imag_modelstates)
-            discount_dist = td.independent.Independent(td.Bernoulli(logits=discount_pred),1)
+            discount_dist = self.DiscountModel(imag_modelstates)
             discount_arr = discount_dist.mean
+
         lambda_returns = compute_return(imag_reward[:-1], imag_value[:-1], discount_arr[:-1], bootstrap=imag_value[-1], lambda_=self.lambda_)    
-        #lambda_returns = lambda_return(imag_reward, imag_value, imag_value[-1], self.discount, self.lambda_) 
         discount_arr = torch.cat([torch.ones_like(discount_arr[:1]), discount_arr[1:]])
         discount = torch.cumprod(discount_arr[:-1], 0)
+        
         actor_loss = -torch.mean(discount * lambda_returns)
-        #actor_loss = -torch.mean(lambda_returns)
+        
         with torch.no_grad():
             value_modelstates = imag_modelstates[:-1].detach()
             value_discount = discount.detach()
             value_target = lambda_returns.detach()
 
-        value_pred = self.ValueModel(value_modelstates) 
-        value_dist = td.independent.Independent(td.Normal(value_pred,1),1)
+        value_dist = self.ValueModel(value_modelstates) 
         log_prob = value_dist.log_prob(value_target)
         value_loss = -torch.mean(value_discount*log_prob.unsqueeze(-1))
-        #value_loss = 0.5*torch.sum(torch.mean((value_pred-value_target)**2, dim=1))
+        
         return actor_loss, value_loss
 
     def representation_loss(self, obs, actions, rewards, nonterms):
@@ -218,25 +222,20 @@ class Trainer(object):
         prev_rssm_state = self.RSSM._init_rssm_state(self.batch_size)
         prior, posterior = self.RSSM.rollout_observation(self.seq_len, embed, actions, prev_rssm_state)
         post_modelstate = get_feat(posterior)
-        decoded_obs = self.ObsDecoder(post_modelstate)
-        decoded_rewards = self.RewardDecoder(post_modelstate)
-        decoded_pcont = self.DiscountModel(post_modelstate)
-
-        obs_dist = td.independent.Independent(td.Normal(decoded_obs,1),1)
-        obs_loss = -torch.mean(obs_dist.log_prob(obs))
-
-        reward_dist = td.independent.Independent(td.Normal(decoded_rewards[:-1],1),1)
-        reward_loss = -torch.mean(reward_dist.log_prob(rewards[1:]))
-
+        obs_dist = self.ObsDecoder(post_modelstate)
+        reward_dist = self.RewardDecoder(post_modelstate[:-1])
+        pcont_dist = self.DiscountModel(post_modelstate[:-1])
         pcont_target = nonterms.float()
-        pcont_dist = td.independent.Independent(td.Bernoulli(logits=decoded_pcont[:-1]),1)
+
+        obs_loss = -torch.mean(obs_dist.log_prob(obs))
+        reward_loss = -torch.mean(reward_dist.log_prob(rewards[1:]))
         pcont_loss = -torch.mean(pcont_dist.log_prob(pcont_target[1:]))
         
         prior_dist = get_dist(prior)
         post_dist = get_dist(posterior)
         div = torch.mean(torch.distributions.kl.kl_divergence(post_dist, prior_dist))
-        #div = torch.max(div, div.new_full(div.size(), self.free_nats))
-        model_loss = self.kl_scale * div + reward_loss + obs_loss + 10*pcont_loss
+
+        model_loss = self.kl_scale * div + reward_loss + obs_loss + self.pcont_scale*pcont_loss
 
         return model_loss, div, obs_loss, reward_loss, pcont_loss, prior_dist, post_dist, posterior
 
@@ -248,6 +247,7 @@ class Trainer(object):
             "RewardDecoder": self.RewardDecoder.state_dict(),
             "ActionModel": self.ActionModel.state_dict(),
             "ValueModel": self.ValueModel.state_dict(),
+            "DiscountModel": self.DiscountModel.state_dict(),
         }
     
     def load_save_dict(self, saved_dict):
@@ -257,5 +257,6 @@ class Trainer(object):
         self.RewardDecoder.load_state_dict(saved_dict["RewardDecoder"])
         self.ActionModel.load_state_dict(saved_dict["ActionModel"])
         self.ValueModel.load_state_dict(saved_dict["ValueModel"])
+        self.DiscountModel.load_state_dict(saved_dict['DiscountModel'])
 
     
