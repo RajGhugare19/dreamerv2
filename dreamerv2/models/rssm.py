@@ -4,6 +4,29 @@ import torch.nn as nn
 import torch.nn.functional as F
 from dreamerv2.utils.rssm_utils import stack_states, RSSMContState
 
+class DiscreteRSSM(nn.Module):
+    def __init__(
+        self,
+        action_size,
+        deter_size,
+        stoch_size,
+        class_size,
+        node_size,
+        embedding_size,
+        device,
+        act_fn=nn.ELU,  
+    ):
+        super().__init__()
+        self.device = device
+        self.action_size = action_size
+        self.node_size = node_size
+        self.embedding_size = embedding_size
+        self.stoch_size =  stoch_size
+        self.class_size = class_size
+
+        self.act_fn = act_fn
+        raise NotImplementedError
+
 class RSSM(nn.Module):
     def __init__(
         self,

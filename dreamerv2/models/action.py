@@ -23,7 +23,7 @@ class ActionModel(nn.Module):
         init_std=5,
         train_noise=0.4,
         eval_noise=0,
-        expl_min=0.01,
+        expl_min=0.1,
         expl_decay=20000,
     ):
         """
@@ -83,8 +83,8 @@ class ActionModel(nn.Module):
         """
         single policy rollout
         """
-        feat = get_feat(rssm_state)
-        action_dist = self.get_action_dist(feat)
+        modelstate = get_feat(rssm_state)
+        action_dist = self.get_action_dist(modelstate)
         if self.dist == 'tanh_normal':
             if self.training:
                 action = action_dist.rsample()

@@ -38,9 +38,11 @@ class Trainer(object):
         self.ActionModel = ActionModel(action_size, deter_size, stoch_size, node_size, embedding_size, action_dist, expl_type).to(self.device)
         self.RewardDecoder = DenseModel((1,), stoch_size+deter_size, reward_layers, node_size, dist='normal').to(self.device)
         self.ValueModel = DenseModel((1,), stoch_size+deter_size, value_layers, node_size, dist='normal').to(self.device)
-        self.TargetValueModel = DenseModel((1,), stoch_size+deter_size, value_layers, node_size, dist='normal').to(self.device).eval()
-        self.TargetValueModel.load_state_dict(self.ValueModel.state_dict())
-        self.DiscountModel = DenseModel((1,), stoch_size+deter_size, discount_layers, node_size, dist='binary').to(self.device)
+        self.TargetValueModel = DenseModel((1,), stoch_size+deter_size, value_layers, node_size, dist='normal').to(self.device)
+        if training_config['use_fixed_target']:
+            self.TargetValueModel.load_state_dict(self.ValueModel.state_dict())
+        if training_config['use_discount_model']:
+            self.DiscountModel = DenseModel((1,), stoch_size+deter_size, discount_layers, node_size, dist='binary').to(self.device)
         if not pixels:
             self.ObsEncoder = DenseModel(embedding_size, int(np.prod(obs_shape)), encoder_layers, node_size).to(self.device)
             self.ObsDecoder = DenseModel(obs_shape, stoch_size+deter_size, decoder_layers, node_size, dist='normal').to(self.device)
@@ -94,7 +96,7 @@ class Trainer(object):
         prev_action = torch.zeros(1, self.action_size).to(self.device)
         while not done:
             _, posterior_rssm_state = self.RSSM.rssm_observe(embed, prev_action, prev_rssmstate)
-            action, action_dist = self.ActionModel(posterior_rssm_state)
+            action, _ = self.ActionModel(posterior_rssm_state)
             action = self.ActionModel.add_exploration(action, metrics['train_iters'])
             next_obs, rew, done, _ = env.step(action.squeeze(0).detach().cpu().numpy())
             score += rew
@@ -168,7 +170,7 @@ class Trainer(object):
             kl_l.append(kl_loss.item())
             pcont_l.append(pcont_loss.item())
 
-        
+
         train_metrics['model_loss'] = np.mean(model_l)
         train_metrics['kl_loss']=np.mean(kl_l)
         train_metrics['reward_loss']=np.mean(reward_l)
@@ -234,11 +236,31 @@ class Trainer(object):
         prior_dist = get_dist(prior)
         post_dist = get_dist(posterior)
         div = torch.mean(torch.distributions.kl.kl_divergence(post_dist, prior_dist))
-
         model_loss = self.kl_scale * div + reward_loss + obs_loss + self.pcont_scale*pcont_loss
 
         return model_loss, div, obs_loss, reward_loss, pcont_loss, prior_dist, post_dist, posterior
 
+    def kl_loss(self):
+        raise NotImplementedError
+    
+    def obs_loss(self):
+        raise NotImplementedError
+    
+    def reward_loss(self):
+        raise NotImplementedError
+    
+    def pcont_loss(self):
+        raise NotImplementedError
+
+    def actor_loss(self):
+        raise NotImplementedError
+    
+    def value_loss(self):
+        raise NotImplementedError
+
+    def save_model(self, save_name):
+        raise NotImplementedError
+    
     def get_save_dict(self):
         return {
             "RSSM": self.RSSM.state_dict(),
