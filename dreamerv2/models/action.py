@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import torch.distributions
 import numpy as np
 from dreamerv2.models.distributions import TanhBijector, SampleDist
-from dreamerv2.utils import get_feat
+from dreamerv2.utils.rssm import get_modelstate
 
 
 class ActionModel(nn.Module):
@@ -83,7 +83,7 @@ class ActionModel(nn.Module):
         """
         single policy rollout
         """
-        modelstate = get_feat(rssm_state)
+        modelstate = get_modelstate(rssm_state)
         action_dist = self.get_action_dist(modelstate)
         if self.dist == 'tanh_normal':
             if self.training:
@@ -124,5 +124,4 @@ class ActionModel(nn.Module):
                 action = torch.zeros_like(action)
                 action[..., index] = 1
             return action
-
         raise NotImplementedError

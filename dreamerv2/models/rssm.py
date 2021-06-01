@@ -1,8 +1,7 @@
 import torch
-from torch._C import device
 import torch.nn as nn
 import torch.nn.functional as F
-from dreamerv2.utils.rssm_utils import stack_states, RSSMContState
+from dreamerv2.utils.rssm import stack_states, RSSMContState
 
 class DiscreteRSSM(nn.Module):
     def __init__(

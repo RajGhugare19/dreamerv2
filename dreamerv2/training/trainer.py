@@ -3,9 +3,9 @@ import torch
 import torch.optim as optim
 import torch.distributions as td
 
-from dreamerv2.utils.rssm_utils import RSSMContState, get_feat, get_dist, rssm_seq_to_batch, rssm_detach
-from dreamerv2.utils.module_utils import get_parameters, FreezeParameters
-from dreamerv2.utils.algo_utils import lambda_return, compute_return
+from dreamerv2.utils.rssm import RSSMContState, get_modelstate, get_dist, rssm_seq_to_batch, rssm_detach
+from dreamerv2.utils.module import get_parameters, FreezeParameters
+from dreamerv2.utils.algorithm import lambda_return, compute_return
 
 from dreamerv2.models.action import ActionModel
 from dreamerv2.models.dense import DenseModel
@@ -190,7 +190,7 @@ class Trainer(object):
         
         with FreezeParameters(self.world_list):
             imag_rssm_states,_ = self.RSSM.rollout_imagination(self.horizon, self.ActionModel, batched_posterior)
-        imag_modelstates = get_feat(imag_rssm_states)
+        imag_modelstates = get_modelstate(imag_rssm_states)
         
         with FreezeParameters(self.world_list+self.value_list+[self.TargetValueModel]):
             imag_reward_dist = self.RewardDecoder(imag_modelstates)
@@ -223,7 +223,7 @@ class Trainer(object):
         embed = self.ObsEncoder(obs)
         prev_rssm_state = self.RSSM._init_rssm_state(self.batch_size)
         prior, posterior = self.RSSM.rollout_observation(self.seq_len, embed, actions, prev_rssm_state)
-        post_modelstate = get_feat(posterior)
+        post_modelstate = get_modelstate(posterior)
         obs_dist = self.ObsDecoder(post_modelstate)
         reward_dist = self.RewardDecoder(post_modelstate[:-1])
         pcont_dist = self.DiscountModel(post_modelstate[:-1])

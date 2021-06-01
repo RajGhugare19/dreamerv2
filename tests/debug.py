@@ -3,8 +3,8 @@ import numpy as np
 import gym
 import gym_minigrid
 from gym_minigrid.wrappers import OneHotPartialObsWrapper
-from dreamerv2.utils.wrapper_utils import TimeLimit, ActionRepeat, NormalizedObs, SimpleGrid, OneHotAction, SimpleOneHotPartialObsWrapper
-from dreamerv2.buffers import EpisodicBuffer
+from dreamerv2.utils.wrappers import TimeLimit, ActionRepeat, NormalizedObs, SimpleGrid, SimpleOneHotPartialObsWrapper, OneHotAction
+from dreamerv2.utils.buffers import EpisodicBuffer
 from dreamerv2.training.trainer import Trainer
 
 import wandb
@@ -37,8 +37,8 @@ action_repeat = 1
 time_limit = 200   
 max_episodes = 400
 bits = 5
-obs_shape = (4,)
-action_size = 2
+obs_shape = (49*3,)
+action_size = 3
 deter_size = 100
 stoch_size = 20
 node_size = 100
@@ -53,9 +53,9 @@ action_dist = 'one_hot'
 expl_type = 'epsilon_greedy'
 
 device = torch.device('cuda')
-#env = gym.make(env_name)
-#env = OneHotAction(SimpleOneHotPartialObsWrapper(env))
-env = OneHotAction(NormalizedObs(gym.make('CartPole-v0')))
+env = gym.make(env_name)
+env = OneHotAction(SimpleOneHotPartialObsWrapper(env))
+#env = OneHotAction(NormalizedObs(gym.make('CartPole-v0')))
 buffer = EpisodicBuffer(max_episodes, obs_shape, action_size)
 trainer = Trainer(obs_shape, action_size, deter_size, stoch_size, node_size, embedding_size, action_dist, expl_type, training_config, buffer, device, encoder_layers, decoder_layers, reward_layers, value_layers, discount_layers)
 
@@ -64,7 +64,6 @@ train_metrics = dict(
     train_rewards = 0,
     running_rewards = 0,
 )
-
 
 with wandb.init(project='dreamer', config=training_config):
     trainer.collect_seed_episodes(env)

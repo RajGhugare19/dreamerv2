@@ -55,7 +55,7 @@ def stack_states(rssm_states, dim):
         torch.stack([state.deter for state in rssm_states], dim=dim),
     )
 
-def get_feat(rssm_state: RSSMContState):
+def get_modelstate(rssm_state: RSSMContState):
     """
     returns concatenation of deterministic and stochastic parts of RSSMContState 
     """
