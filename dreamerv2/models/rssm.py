@@ -20,6 +20,7 @@ class DiscreteRSSM(nn.Module):
         self.action_size = action_size
         self.node_size = node_size
         self.embedding_size = embedding_size
+        self.deter_size = deter_size
         self.stoch_size =  stoch_size
         self.class_size = class_size
 
@@ -106,15 +107,17 @@ class RSSM(nn.Module):
         rssm_state = prev_rssm_state
         next_rssm_states = []
         actions = []
+        policy_entropy = []
         for t in range(horizon):
-            action, _ = actor(prev_rssm_state)
+            action, action_dist = actor(prev_rssm_state)
             rssm_state = self.rssm_imagine(action, rssm_state)
             next_rssm_states.append(rssm_state)
             actions.append(action)
-            
+            policy_entropy.append(action_dist.entropy())
         next_rssm_states = stack_states(next_rssm_states, dim=0)
         actions = torch.stack(actions, dim=0)
-        return next_rssm_states, actions
+        policy_entropy = torch.stack(policy_entropy, dim=0)
+        return next_rssm_states, actions, policy_entropy
     
     def rssm_observe(self, obs_embed, prev_action, prev_rssm_state):
         """

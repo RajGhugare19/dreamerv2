@@ -1,5 +1,6 @@
 import gym
 from gym.core import RewardWrapper 
+from gym_minigrid.minigrid import COLOR_TO_IDX, OBJECT_TO_IDX, STATE_TO_IDX
 import numpy as np
 
 class ActionRepeat(gym.Wrapper):
@@ -185,24 +186,136 @@ class SimpleOneHotPartialObsWrapper(gym.core.ObservationWrapper):
         
         return out.reshape(-1)
     
-class TransformReward(RewardWrapper):
-    r"""Transform the reward via an arbitrary function.
-    Example::
-        >>> import gym
-        >>> env = gym.make('CartPole-v1')
-        >>> env = TransformReward(env, lambda r: 0.01*r)
-        >>> env.reset()
-        >>> observation, reward, done, info = env.step(env.action_space.sample())
-        >>> reward
-        0.01
-    Args:
-        env (Env): environment
-        f (callable): a function that transforms the reward
-    """
-    def __init__(self, env, f):
-        super(TransformReward, self).__init__(env)
-        assert callable(f)
-        self.f = f
+EMPTY = ['MiniGrid-Empty-5x5-v0', 'MiniGrid-Empty-Random-5x5-v0', 'MiniGrid-Empty-6x6-v0', 'MiniGrid-Empty-Random-6x6-v0', 'MiniGrid-Empty-8x8-v0', 'MiniGrid-Empty-16x16-v0']
+FOUROOMS = ['MiniGrid-FourRooms-v0']
+DOORKEY = ['MiniGrid-DoorKey-5x5-v0', 'MiniGrid-DoorKey-6x6-v0', 'MiniGrid-DoorKey-8x8-v0',  'MiniGrid-DoorKey-16x16-v0']
+LAVA = [ 'MiniGrid-DistShift1-v0', 'MiniGrid-DistShift2-v0']
+env_object = {
+    'Empty':{
+            1 : 0,
+            2 : 1,
+            8 : 2,
+        },
+    'FourRooms': {
+            1 : 0,
+            2 : 1,
+            8 : 2,
+        },
+    'DoorKey':{
+            0 : 0,
+            1 : 1,
+            2 : 2,
+            4 : 3,
+            5 : 4,
+            8 : 5,
+        },
+    'DoorKey':{
+            0 : 0,
+            1 : 1,
+            2 : 2,
+            4 : 3,
+            5 : 4,
+            8 : 5,
+        },
+    'Lava':{
+            1 : 0,
+            2 : 1,
+            8 : 2,
+            9 : 3,
+        },
+}
 
-    def reward(self, reward):
-        return self.f(reward)
+env_num_state = {
+    'Empty': 0,
+    'FourRooms': 0,
+    'DoorKey': 3,
+    'Lava': 0,
+}
+
+env_num_color = {
+    'Empty': 0,
+    'FourRooms': 0,
+    'DoorKey': 0,
+    'Lava': 0,
+}
+
+env_actions = {
+    'Empty': [0,1,2],
+    'FourRooms': [0,1,2],
+    'DoorKey': [0,1,2,3,4,5],
+    'Lava': [0,1,2],
+}
+
+class MinimalPartialObsWrapper(gym.core.ObservationWrapper):
+    def __init__(self, env, tile_size=8):
+        super().__init__(env)
+        env_id = env.unwrapped.spec.id
+        if env_id in EMPTY:
+            env_type = 'Empty'
+        elif env_id in FOUROOMS:
+            env_type = 'FourRooms'
+        elif env_id in DOORKEY:
+            env_type = 'DoorKey'
+        elif env_id in LAVA:
+            env_type = 'Lava'
+        else:
+            raise NotImplementedError
+
+        self.OBJECTidx_TO_SIMPLEidx = env_object[env_type]
+        self.num_obj = len(env_object[env_type])
+        self.num_state = env_num_state[env_type]
+        self.num_color = env_num_color[env_type]
+        num_bits = self.num_obj + self.num_state + self.num_color
+        self.tile_size = tile_size
+        obs_shape = env.observation_space['image'].shape
+        self.observation_space.spaces["image"] = gym.spaces.Box(
+            low=0,
+            high=255,
+            shape=(obs_shape[0], obs_shape[1], num_bits),
+            dtype='uint8'
+        ) 
+        self.action_space = gym.spaces.Discrete(3)
+    def observation(self, obs):
+        img = obs['image']
+        out = np.zeros(self.observation_space.spaces['image'].shape, dtype='uint8')       
+        if self.num_color == 0 and self.num_state == 0:
+            for i in range(img.shape[0]):
+                for j in range(img.shape[1]):
+                    type = img[i, j, 0]
+                    out[i, j, self.OBJECTidx_TO_SIMPLEidx[type]] = 1
+                    
+        elif self.num_color == 0:
+            for i in range(img.shape[0]):
+                for j in range(img.shape[1]):
+                    type = img[i, j, 0]
+                    state = img[i, j, 2]
+                    out[i, j, self.OBJECTidx_TO_SIMPLEidx[type]] = 1
+                    out[i, j, self.num_obj + state] = 1
+        else:
+            for i in range(img.shape[0]):
+                for j in range(img.shape[1]):
+                    type = img[i, j, 0]
+                    color = img[i, j, 1]
+                    state = img[i, j, 2]
+
+                    out[i, j, self.OBJECTidx_TO_SIMPLEidx[type]] = 1
+                    out[i, j, self.num_obj + color] = 1
+                    out[i, j, self.num_obj + self.num_color + state] = 1
+                    
+        return {
+            'mission': obs['mission'],
+            'image': out
+        }
+
+class FlatObsWrapper(gym.core.ObservationWrapper):
+    def __init__(self, env, tile_size=8):
+        super().__init__(env)
+        obs_shape = env.observation_space['image'].shape
+        self.observation_space = gym.spaces.Box(
+            low=0,
+            high=255,
+            shape=(np.prod(obs_shape),),
+            dtype='uint8'
+        ) 
+    def observation(self, obs):
+        return obs['image'].reshape(-1)

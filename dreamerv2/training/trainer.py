@@ -37,9 +37,10 @@ class Trainer(object):
         self.RSSM = RSSM(action_size, deter_size, stoch_size, node_size, embedding_size, self.device).to(self.device)
         self.ActionModel = ActionModel(action_size, deter_size, stoch_size, node_size, embedding_size, action_dist, expl_type).to(self.device)
         self.RewardDecoder = DenseModel((1,), stoch_size+deter_size, reward_layers, node_size, dist='normal').to(self.device)
-        self.ValueModel = DenseModel((1,), stoch_size+deter_size, value_layers, node_size, dist='normal').to(self.device)
-        self.TargetValueModel = DenseModel((1,), stoch_size+deter_size, value_layers, node_size, dist='normal').to(self.device)
+        self.ValueModel = DenseModel((1,), stoch_size+deter_size, value_layers, node_size).to(self.device)
+
         if training_config['use_fixed_target']:
+            self.TargetValueModel = DenseModel((1,), stoch_size+deter_size, value_layers, node_size).to(self.device)
             self.TargetValueModel.load_state_dict(self.ValueModel.state_dict())
         if training_config['use_discount_model']:
             self.DiscountModel = DenseModel((1,), stoch_size+deter_size, discount_layers, node_size, dist='binary').to(self.device)
@@ -52,6 +53,10 @@ class Trainer(object):
         self.buffer = buffer
         self.action_size = action_size
         self.pixels = pixels
+        self.use_fixed_target = training_config['use_fixed_target']
+        self.kl_balancing_scale = None
+        if training_config['use_kl_balancing']:
+            self.kl_balancing_scale = training_config['kl_balancing_scale']
         self.seq_len = training_config['seq_len']
         self.batch_size = training_config['batch_size']
         self.collect_intervals = training_config['collect_intervals']
@@ -64,6 +69,7 @@ class Trainer(object):
         self.horizon = training_config['horizon']
         self.kl_scale = training_config['kl_scale']
         self.pcont_scale = training_config['pcont_scale']
+        self.actor_entropy_scale = training_config['actor_entropy_scale']
         self.grad_clip_norm = training_config['grad_clip_norm']
         self.optim_initialize()
         
@@ -71,6 +77,8 @@ class Trainer(object):
         self.world_list = [self.ObsEncoder, self.RSSM, self.RewardDecoder, self.ObsDecoder, self.DiscountModel]
         self.actor_list = [self.ActionModel]
         self.value_list = [self.ValueModel]
+        if self.use_fixed_target:
+            self.value_list += [self.TargetValueModel]
         self.actorcritic_list = [self.ActionModel, self.ValueModel]
         self.model_optimizer = optim.Adam(get_parameters(self.world_list), self.model_lr)
         self.actor_optimizer = optim.Adam(get_parameters(self.actor_list), self.actor_lr)
@@ -86,39 +94,15 @@ class Trainer(object):
                     self.buffer.add(s,a,r,done,ns)
                 else:
                     self.buffer.add(s,a,r,done)
-                    s = ns
-
-    def env_interact(self, env, metrics):
-        obs, score = env.reset(), 0
-        done = False
-        embed = self.ObsEncoder(torch.tensor(obs, dtype=torch.float32).unsqueeze(0).to(self.device))
-        prev_rssmstate = self.RSSM._init_rssm_state(1)
-        prev_action = torch.zeros(1, self.action_size).to(self.device)
-        while not done:
-            _, posterior_rssm_state = self.RSSM.rssm_observe(embed, prev_action, prev_rssmstate)
-            action, _ = self.ActionModel(posterior_rssm_state)
-            action = self.ActionModel.add_exploration(action, metrics['train_iters'])
-            next_obs, rew, done, _ = env.step(action.squeeze(0).detach().cpu().numpy())
-            score += rew
-            metrics['train_iters'] += 1
-            if done:
-                self.buffer.add(obs, action.squeeze(0).detach().cpu().numpy(), rew, done, next_obs)
-            else:
-                self.buffer.add(obs, action.squeeze(0).detach().cpu().numpy(), rew, done)
-                obs = next_obs
-            embed = self.ObsEncoder(torch.tensor(obs, dtype=torch.float32).unsqueeze(0).to(self.device))
-            prev_rssmstate = posterior_rssm_state
-            prev_action = action
-        metrics['train_episodes'] += 1
-        metrics['train_rewards'] = score
-        metrics['running_rewards'] = 0.9*metrics['running_rewards'] + 0.1*score
-        return metrics        
+                    s = ns    
 
     def update_target(self):
         self.TargetValueModel.load_state_dict(self.ValueModel.state_dict())
 
     def train_batch(self, train_metrics):
-        """ (seq_len, batch_size, *dims) """
+        """ (seq_len, batch_size, *dims) 
+        trains the world model and imagination actor and critic for collect_interval times using data from buffer
+        """
         actor_l = []
         value_l = []
         obs_l = []
@@ -140,7 +124,7 @@ class Trainer(object):
             
             self.model_optimizer.zero_grad()
             model_loss.backward()
-            grad_norm_model = torch.nn.utils.clip_grad_norm_(get_parameters(self.world_list),self.grad_clip_norm)
+            grad_norm_model = torch.nn.utils.clip_grad_norm_(get_parameters(self.world_list), self.grad_clip_norm)
             self.model_optimizer.step()
 
             actor_loss, value_loss = self.actorcritc_loss(posterior)
@@ -189,14 +173,16 @@ class Trainer(object):
             batched_posterior = rssm_detach(rssm_seq_to_batch(posterior, self.batch_size, self.seq_len-1))
         
         with FreezeParameters(self.world_list):
-            imag_rssm_states,_ = self.RSSM.rollout_imagination(self.horizon, self.ActionModel, batched_posterior)
+            imag_rssm_states, _, policy_entropy = self.RSSM.rollout_imagination(self.horizon, self.ActionModel, batched_posterior)
         imag_modelstates = get_modelstate(imag_rssm_states)
         
-        with FreezeParameters(self.world_list+self.value_list+[self.TargetValueModel]):
+        with FreezeParameters(self.world_list+self.value_list):
             imag_reward_dist = self.RewardDecoder(imag_modelstates)
             imag_reward = imag_reward_dist.mean
-            imag_value_dist = self.TargetValueModel(imag_modelstates)
-            imag_value = imag_value_dist.mean
+            if self.use_fixed_target:
+                imag_value = self.TargetValueModel(imag_modelstates)
+            else:
+                imag_value = self.ValueModel(imag_modelstates)
 
         with FreezeParameters([self.DiscountModel]):
             discount_dist = self.DiscountModel(imag_modelstates)
@@ -205,17 +191,15 @@ class Trainer(object):
         lambda_returns = compute_return(imag_reward[:-1], imag_value[:-1], discount_arr[:-1], bootstrap=imag_value[-1], lambda_=self.lambda_)    
         discount_arr = torch.cat([torch.ones_like(discount_arr[:1]), discount_arr[1:]])
         discount = torch.cumprod(discount_arr[:-1], 0)
-        
-        actor_loss = -torch.mean(discount * lambda_returns)
-        
+        policy_entropy = policy_entropy[:-1].unsqueeze(-1)
+        actor_loss = -torch.sum(torch.mean(discount * (lambda_returns + self.actor_entropy_scale * policy_entropy), dim=1)) 
         with torch.no_grad():
             value_modelstates = imag_modelstates[:-1].detach()
             value_discount = discount.detach()
             value_target = lambda_returns.detach()
 
-        value_dist = self.ValueModel(value_modelstates) 
-        log_prob = value_dist.log_prob(value_target)
-        value_loss = -torch.mean(value_discount*log_prob.unsqueeze(-1))
+        value_pred = self.ValueModel(value_modelstates) 
+        value_loss = torch.mean((0.5*(value_discount*(value_target-value_pred))**2).sum())
         
         return actor_loss, value_loss
 
@@ -227,35 +211,43 @@ class Trainer(object):
         obs_dist = self.ObsDecoder(post_modelstate)
         reward_dist = self.RewardDecoder(post_modelstate[:-1])
         pcont_dist = self.DiscountModel(post_modelstate[:-1])
-        pcont_target = nonterms.float()
-
-        obs_loss = -torch.mean(obs_dist.log_prob(obs))
-        reward_loss = -torch.mean(reward_dist.log_prob(rewards[1:]))
-        pcont_loss = -torch.mean(pcont_dist.log_prob(pcont_target[1:]))
         
-        prior_dist = get_dist(prior)
-        post_dist = get_dist(posterior)
-        div = torch.mean(torch.distributions.kl.kl_divergence(post_dist, prior_dist))
-        model_loss = self.kl_scale * div + reward_loss + obs_loss + self.pcont_scale*pcont_loss
+        obs_loss = self._obs_loss(obs_dist, obs)
+        reward_loss = self._reward_loss(reward_dist, rewards[1:])
+        pcont_loss = self._pcont_loss(pcont_dist, nonterms[1:])
+        prior_dist, post_dist, div = self._kl_loss(prior, posterior)
 
+        model_loss = self.kl_scale * div + reward_loss + obs_loss + self.pcont_scale*pcont_loss
         return model_loss, div, obs_loss, reward_loss, pcont_loss, prior_dist, post_dist, posterior
 
-    def kl_loss(self):
-        raise NotImplementedError
+    def _obs_loss(self, obs_dist, obs):
+        obs_loss = -torch.mean(obs_dist.log_prob(obs))
+        return obs_loss
     
-    def obs_loss(self):
-        raise NotImplementedError
+    def _kl_loss(self, prior, posterior):
+        #To implement free nats
+        prior_dist = get_dist(prior)
+        post_dist = get_dist(posterior)
+        if self.kl_balancing_scale is not None:
+            kl_loss = self.kl_balancing_scale*torch.mean(torch.distributions.kl.kl_divergence(get_dist(rssm_detach(posterior)), prior_dist)) + \
+                (1-self.kl_balancing_scale)*torch.mean(torch.distributions.kl.kl_divergence(post_dist, get_dist(rssm_detach(prior))))
+        else: 
+            kl_loss = torch.mean(torch.distributions.kl.kl_divergence(post_dist, prior_dist))
+        return prior_dist, post_dist, kl_loss
     
-    def reward_loss(self):
-        raise NotImplementedError
+    def _reward_loss(self, reward_dist, rewards):
+        reward_loss = -torch.mean(reward_dist.log_prob(rewards))
+        return reward_loss
     
-    def pcont_loss(self):
-        raise NotImplementedError
+    def _pcont_loss(self, pcont_dist, nonterms):
+        pcont_target = nonterms.float()
+        pcont_loss = -torch.mean(pcont_dist.log_prob(pcont_target))
+        return pcont_loss
 
-    def actor_loss(self):
+    def _actor_loss(self):
         raise NotImplementedError
     
-    def value_loss(self):
+    def _value_loss(self):
         raise NotImplementedError
 
     def save_model(self, save_name):
