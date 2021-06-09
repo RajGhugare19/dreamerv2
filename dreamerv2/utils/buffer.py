@@ -11,20 +11,18 @@ class EpisodicBuffer():
     """
     def __init__(
         self,
-        total_episodes,
+        total_episodes: int,
         obs_shape: Tuple[int],
         action_size: int,
-        obs_type=np.float32,
-        action_type=np.float32,
-        max_trajectory_length: Optional[int] = None,
+        obs_type: Optional[np.dtype] = np.uint8,
+        action_type: Optional[np.dtype] =np.float32,
     ):
         self.total_episodes = total_episodes
         self.obs_shape = obs_shape
         self.action_size = action_size
         self.obs_type = obs_type
         self.action_type = action_type
-        self.max_trajectory_length = max_trajectory_length
-        self.buffer = deque([],maxlen=total_episodes)
+        self.buffer = deque([], maxlen=total_episodes)
         self._full = False
         self._episode_cnt = 0
         self._init_episode()
