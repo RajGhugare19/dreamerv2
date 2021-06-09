@@ -1,4 +1,3 @@
-import torch
 import numpy as np
 import torch.nn as nn
 import torch.distributions as td
@@ -6,20 +5,22 @@ import torch.distributions as td
 class DenseModel(nn.Module):
     def __init__(
             self, 
-            output_shape, 
+            output_shape,
             input_size, 
-            layers, 
-            node_size, 
-            dist=None,
-            activation=nn.ELU
+            info,
         ):
+        """
+        :param output_shape: tuple containing shape of expected output
+        :param input_size: size of input features
+        :param info: dict containing num of hidden layers, size of hidden layers, activation function, output distribution etc.
+        """
         super().__init__()
         self._output_shape = output_shape
         self._input_size = input_size
-        self._layers = layers
-        self._node_size = node_size
-        self.activation = activation
-        self.dist = dist
+        self._layers = info['layers']
+        self._node_size = info['node_size']
+        self.activation = info['activation']
+        self.dist = info['dist']
         self.model = self.build_model()
 
     def build_model(self):

@@ -1,54 +1,30 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from dreamerv2.utils.rssm import stack_states, RSSMContState
-
-class DiscreteRSSM(nn.Module):
-    def __init__(
-        self,
-        action_size,
-        deter_size,
-        stoch_size,
-        class_size,
-        node_size,
-        embedding_size,
-        device,
-        act_fn=nn.ELU,  
-    ):
-        super().__init__()
-        self.device = device
-        self.action_size = action_size
-        self.node_size = node_size
-        self.embedding_size = embedding_size
-        self.deter_size = deter_size
-        self.stoch_size =  stoch_size
-        self.class_size = class_size
-
-        self.act_fn = act_fn
-        raise NotImplementedError
+from dreamerv2.utils.rssm import get_dist, stack_states, rssm_detach, RSSMState
 
 class RSSM(nn.Module):
     def __init__(
         self,
         action_size,
         deter_size,
-        stoch_size,
-        node_size,
+        class_size,
+        category_size,
+        rssm_node_size,
         embedding_size,
         device,
         act_fn=nn.ELU,  
-        min_std=0.1, 
     ):
         super().__init__()
         self.device = device
         self.action_size = action_size
         self.deter_size = deter_size
-        self.stoch_size = stoch_size
-        self.node_size = node_size
+        self.class_size = class_size
+        self.category_size = category_size
+        self.node_size = rssm_node_size
         self.embedding_size = embedding_size
-        self.min_std = min_std
-
         self.act_fn = act_fn
+        self.stoch_size = self.category_size*self.class_size
+
         self.rnn = nn.GRUCell(self.deter_size, self.deter_size)
         self.fc_embed_state_action = self._build_embed_state_action()
         self.fc_prior = self._build_temporal_prior()
@@ -70,7 +46,7 @@ class RSSM(nn.Module):
         """
         temporal_prior = [nn.Linear(self.deter_size, self.node_size)]
         temporal_prior += [self.act_fn()]
-        temporal_prior += [nn.Linear(self.node_size, 2 * self.stoch_size)]
+        temporal_prior += [nn.Linear(self.node_size, self.stoch_size)]
         return nn.Sequential(*temporal_prior)
 
     def _build_temporal_posterior(self):
@@ -80,7 +56,7 @@ class RSSM(nn.Module):
         """
         temporal_posterior = [nn.Linear(self.deter_size + self.embedding_size, self.node_size)]
         temporal_posterior += [self.act_fn()]
-        temporal_posterior += [nn.Linear(self.node_size, 2 * self.stoch_size)]
+        temporal_posterior += [nn.Linear(self.node_size, self.stoch_size)]
         return nn.Sequential(*temporal_posterior)
     
     def rssm_imagine(self, prev_action, prev_rssm_state):
@@ -88,51 +64,55 @@ class RSSM(nn.Module):
         given previous_rssm_state and previous action, the model outputs latest rssm_state
         this is equivalent to imagining in latent space
         """
-        state_action_embed = self.fc_embed_state_action(torch.cat([prev_rssm_state.stoch, prev_action],dim=-1))
+        prev_stoch_state = prev_rssm_state.stoch
+        state_action_embed = self.fc_embed_state_action(torch.cat([prev_stoch_state, prev_action], dim=-1))
         deter_state = self.rnn(state_action_embed, prev_rssm_state.deter)
+        prior_logits = self.fc_prior(deter_state)
+        prior = get_dist(prior_logits, self.category_size, self.class_size)
+        prior_stoch_state = prior.rsample()
+        prior_stoch_state = torch.reshape(prior_stoch_state, shape=(*prior_stoch_state.shape[:-2], self.category_size*self.class_size))
+        prior_rssm_state = RSSMState(prior_logits, prior_stoch_state, deter_state)
 
-        prior_mean, prior_std = torch.chunk(self.fc_prior(deter_state), 2, dim=-1)
-        prior_std = F.softplus(prior_std) + self.min_std
-        prior_stoch_state = prior_mean + prior_std*torch.randn_like(prior_mean)
-        prior_rssm_state = RSSMContState(prior_mean, prior_std, prior_stoch_state, deter_state)
-            
         return prior_rssm_state 
     
     def rollout_imagination(self, horizon:int, actor:nn.Module, prev_rssm_state):
         """
         :param horizon: number of steps to roll out
         :param actor: nn.Module for ActionModel
-        :param prev_rssm_state: (batch_size, stoch_size)
+        :param prev_rssm_state: (batch_size, dims)
         """
         rssm_state = prev_rssm_state
         next_rssm_states = []
-        actions = []
-        policy_entropy = []
+        action_entropy = []
+        imag_log_prob = []
         for t in range(horizon):
-            action, action_dist = actor(prev_rssm_state)
+            action_dist = actor(rssm_state)
+            action = action_dist.rsample()
             rssm_state = self.rssm_imagine(action, rssm_state)
             next_rssm_states.append(rssm_state)
-            actions.append(action)
-            policy_entropy.append(action_dist.entropy())
+            action_entropy.append(action_dist.entropy())
+            imag_log_prob.append(action_dist.log_prob(action.detach()))
+
         next_rssm_states = stack_states(next_rssm_states, dim=0)
-        actions = torch.stack(actions, dim=0)
-        policy_entropy = torch.stack(policy_entropy, dim=0)
-        return next_rssm_states, actions, policy_entropy
-    
+        action_entropy = torch.stack(action_entropy, dim=0)
+        imag_log_prob = torch.stack(imag_log_prob, dim=0)
+        return next_rssm_states, action_entropy, imag_log_prob
+           	
     def rssm_observe(self, obs_embed, prev_action, prev_rssm_state):
         """
         given previous rssm_state, action and latest observation embedding, the model outputs latest rssm_state
         :param obs_embed: (batch_size, embedding_size)
         :param prev_action: (batch_size, action_size)
-        :param prev_rssm_state: RSSMContState
+        :param prev_rssm_state: RSSMState
         """
         prior_rssm_state = self.rssm_imagine(prev_action, prev_rssm_state)
         deter_state = prior_rssm_state.deter
         x = torch.cat([deter_state, obs_embed], dim=-1)
-        posterior_mean, posterior_std = torch.chunk(self.fc_posterior(x), 2, dim=-1)
-        posterior_std = F.softplus(posterior_std) + self.min_std
-        posterior_stoch_state = posterior_mean + posterior_std*torch.randn_like(posterior_mean)
-        posterior_rssm_state = RSSMContState(posterior_mean, posterior_std, posterior_stoch_state, deter_state)
+        posterior_logits = self.fc_posterior(x)
+        posterior = get_dist(posterior_logits, self.category_size, self.class_size)
+        posterior_stoch_state = posterior.rsample()
+        posterior_stoch_state = torch.reshape(posterior_stoch_state, shape=(*posterior_stoch_state.shape[:-2], self.category_size*self.class_size))
+        posterior_rssm_state = RSSMState(posterior_logits, posterior_stoch_state, deter_state)
         
         return prior_rssm_state, posterior_rssm_state
     
@@ -141,7 +121,7 @@ class RSSM(nn.Module):
         :param seq_len: number of steps to roll out
         :param obs_embed: (time_steps, batch_size, embedding_size)
         :param action: (time_steps, batch_size, action_size)
-        :param prev_rssm_state: RSSMContstate
+        :param prev_rssm_state: RSSMstate
         :return prior_state : 
         :return posterior_state : 
         """
@@ -158,8 +138,7 @@ class RSSM(nn.Module):
         return prior, post
 
     def _init_rssm_state(self, batch_size, **kwargs):
-        return RSSMContState(
-            torch.zeros(batch_size, self.stoch_size, **kwargs).to(self.device),
+        return RSSMState(
             torch.zeros(batch_size, self.stoch_size, **kwargs).to(self.device),
             torch.zeros(batch_size, self.stoch_size, **kwargs).to(self.device),
             torch.zeros(batch_size, self.deter_size, **kwargs).to(self.device),
