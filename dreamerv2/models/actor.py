@@ -1,7 +1,6 @@
 import torch 
 import torch.nn as nn
 import numpy as np
-from dreamerv2.utils.rssm import get_modelstate
 
 class DiscreteActionModel(nn.Module):
     def __init__(
@@ -43,16 +42,20 @@ class DiscreteActionModel(nn.Module):
             raise NotImplementedError
         return nn.Sequential(*model) 
 
-    def forward(self, rssm_state):
-        model_state = get_modelstate(rssm_state)
-        logits = self.model(model_state)
-        if self.dist == 'one_hot':
-            dist = torch.distributions.OneHotCategoricalStraightThrough(logits=logits)
-        else:
-            raise NotImplementedError            
-        return dist
+    def forward(self, model_state):
+        action_dist = self.get_action_dist(model_state)
+        action = action_dist.sample()
+        action = action + action_dist.probs - action_dist.probs.detach()
+        return action, action_dist
 
-    def add_noise(self, action: torch.Tensor, itr: int, mode='train'):
+    def get_action_dist(self, modelstate):
+        logits = self.model(modelstate)
+        if self.dist == 'one_hot':
+            return torch.distributions.OneHotCategorical(logits=logits)         
+        else:
+            raise NotImplementedError
+            
+    def add_exploration(self, action: torch.Tensor, itr: int, mode='train'):
         if mode == 'train':
             expl_amount = self.train_noise
             expl_amount = expl_amount - itr/self.expl_decay
