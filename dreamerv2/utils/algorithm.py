@@ -1,12 +1,12 @@
 import torch 
 
 def compute_return(
-                    reward: torch.Tensor,
-                    value: torch.Tensor,
-                    discount: torch.Tensor,
-                    bootstrap: torch.Tensor,
-                    lambda_: float
-                ):
+                reward: torch.Tensor,
+                value: torch.Tensor,
+                discount: torch.Tensor,
+                bootstrap: torch.Tensor,
+                lambda_: float
+            ):
     """
     Compute the discounted reward for a batch of data.
     reward, value, and discount are all shape [horizon - 1, batch, 1] (last element is cut off)
@@ -24,3 +24,4 @@ def compute_return(
         outputs.append(accumulated_reward)
     returns = torch.flip(torch.stack(outputs), [0])
     return returns
+    
