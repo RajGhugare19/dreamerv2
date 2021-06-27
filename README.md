@@ -4,7 +4,7 @@ Pytorch implementation of [Mastering Atari with Discrete World Models](https://a
 
 
 ## Acknowledgments
-Awesome Environments for testing:
+Awesome Environments used for testing:
 
 - MinAtar by kenjyoung : [https://github.com/kenjyoung/MinAtar](https://github.com/kenjyoung/MinAtar)<br>
 - minigrid by maximecb : [https://github.com/maximecb/gym-minigrid](https://github.com/maximecb/gym-minigrid)<br>
