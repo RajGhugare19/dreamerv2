@@ -1,6 +1,6 @@
+from dreamerv2.models.pixel import ObsDecoder
 import minatar
 import gym
-from gym import spaces
 import numpy as np
 
 class GymMinAtar(gym.Env):
@@ -31,7 +31,7 @@ class GymMinAtar(gym.Env):
     
     def render(self, mode='human'):
         if mode == 'rgb_array':
-            return self.game.state()
+            return self.env.state()
         elif mode == 'human':
             self.env.display_state(self.display_time)
 
@@ -39,6 +39,17 @@ class GymMinAtar(gym.Env):
         if self.env.visualized:
             self.env.close_display()
         return 0
+
+class breakoutPOMDP(gym.ObservationWrapper):
+    def __init__(self, env):
+        super(breakoutPOMDP, self).__init__(env)
+        c,h,w = env.observation_space.shape
+        self.observation_space = gym.spaces.MultiBinary((3,h,w))
+
+    def observation(self, observation):
+        #index 2 is trail, which gives ball's direction
+        return np.stack([observation[0], observation[1], observation[3]], axis=0)
+        
 
 class ActionRepeat(gym.Wrapper):
     def __init__(self, env, repeat=1):
@@ -98,26 +109,17 @@ class OneHotAction(gym.Wrapper):
         reference[index] = 1.0
         return reference
 
-class CartPoleWrapper(gym.ObservationWrapper):
-    def __init__(self, env):
-        super(CartPoleWrapper, self).__init__(env)
-    
-    def observation(self, obs):
-        cp = obs[0]
-        ca = obs[2]
-        return np.array([cp,ca])
+class ActionRepeat(gym.Wrapper):
+    def __init__(self, env, repeat=1):
+        super(ActionRepeat, self).__init__(env)
+        self.repeat = repeat
 
-class ImgWrapper(gym.core.ObservationWrapper):
-    def __init__(self, env):
-        super().__init__(env)
-        obs_shape = env.observation_space['image'].shape
-        self.observation_space = gym.spaces.Box(
-            low=0,
-            high=255,
-            shape=(obs_shape[2], obs_shape[0], obs_shape[1]),
-            dtype='uint8'
-        )
-        self.action_space = gym.spaces.Discrete(3)
-    
-    def observation(self, obs):
-        return obs['image'].transpose(2, 0, 1)
+    def step(self, action):
+        done = False
+        total_reward = 0
+        current_step = 0
+        while current_step < self.repeat and not done:
+            obs, reward, done, info = self.env.step(action)
+            total_reward += reward
+            current_step += 1
+        return obs, total_reward, done, info

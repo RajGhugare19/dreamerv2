@@ -3,9 +3,11 @@ import torch.nn as nn
 from dataclasses import dataclass, field
 from typing import Any, Tuple, Dict
 
+# Following HPs are not a result of detailed tuning.   
+
 @dataclass
 class MinAtarConfig():
-    '''default HPs that are known to work for MinAtar envs'''
+    '''default HPs that are known to work for MinAtar envs '''
     #env desc
     env : str                                           
     obs_shape: Tuple                                            
@@ -19,15 +21,15 @@ class MinAtarConfig():
     action_dtype: np.dtype = np.float32
 
     #training desc
-    train_steps: int = int(1e7)
-    train_every: int = 25
+    train_steps: int = int(5e6)
+    train_every: int = 50                                  #reduce this to potentially improve sample requirements
     collect_intervals: int = 5 
     batch_size: int = 50 
     seq_len: int = 50
     eval_episode: int = 4
-    eval_render: bool = False
-    save_every: int = int(5e4)
-    seed_steps: int = 2000
+    eval_render: bool = True
+    save_every: int = int(1e5)
+    seed_steps: int = 4000
     model_dir: int = 'results'
     gif_dir: int = 'results'
     
@@ -47,7 +49,7 @@ class MinAtarConfig():
     kl: Dict = field(default_factory=lambda:{'use_kl_balance':True, 'kl_balance_scale':0.8, 'use_free_nats':False, 'free_nats':0.0})
     use_slow_target: float = True
     slow_target_update: int = 100
-    slow_target_fraction: float = 1.0
+    slow_target_fraction: float = 1.04
 
     #actor critic
     actor: Dict = field(default_factory=lambda:{'layers':3, 'node_size':100, 'dist':'one_hot', 'min_std':1e-4, 'init_std':5, 'mean_scale':5, 'activation':nn.ELU})

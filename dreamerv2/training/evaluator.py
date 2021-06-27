@@ -1,11 +1,5 @@
 import numpy as np
 import torch 
-import gym, gym_minigrid
-import os
-from array2gif import write_gif
-from dreamerv2.utils.module import get_parameters, FreezeParameters
-from dreamerv2.utils.algorithm import compute_return
-from dreamerv2.utils.wrapper import ImgWrapper, OneHotAction
 from dreamerv2.models.actor import DiscreteActionModel
 from dreamerv2.models.rssm import RSSM
 from dreamerv2.models.dense import DenseModel
@@ -46,6 +40,7 @@ class Evaluator(object):
         else:
             self.ObsEncoder = DenseModel((embedding_size,), int(np.prod(obs_shape)), config.obs_encoder).to(self.device).eval()
             self.ObsDecoder = DenseModel(obs_shape, modelstate_size, config.obs_decoder).to(self.device).eval()
+
         self.ActionModel = DiscreteActionModel(action_size, deter_size, stoch_size, embedding_size, config.actor, config.expl).to(self.device).eval()
         self.RSSM = RSSM(action_size, rssm_node_size, embedding_size, self.device, config.rssm_type, config.rssm_info).to(self.device).eval()
 
@@ -54,11 +49,9 @@ class Evaluator(object):
         self.ObsDecoder.load_state_dict(saved_dict["ObsDecoder"])
         self.ActionModel.load_state_dict(saved_dict["ActionModel"])
 
-    def eval_saved_agent(self, env, model_path, gif):
+    def eval_saved_agent(self, env, model_path):
         self.load_model(self.config, model_path)
         eval_episode = self.config.eval_episode
-        if gif:
-            frames = []
         eval_scores = []    
         for e in range(eval_episode):
             obs, score = env.reset(), 0
@@ -71,21 +64,13 @@ class Evaluator(object):
                     _, posterior_rssm_state = self.RSSM.rssm_observe(embed, prev_action, not done, prev_rssmstate)
                     model_state = self.RSSM.get_model_state(posterior_rssm_state)
                     action, _ = self.ActionModel(model_state)
-                
+                    prev_rssmstate = posterior_rssm_state
+                    prev_action = action
                 next_obs, rew, done, _ = env.step(action.squeeze(0).cpu().numpy())
                 if self.config.eval_render:
                     env.render()
                 score += rew
                 obs = next_obs
-                if gif:
-                    frames.append(np.moveaxis(env.render("rgb_array"), 2, 0))
             eval_scores.append(score)
         print('average evaluation score for model at ' + model_path + ' = ' +str(np.mean(eval_scores)))
-
-        if gif:
-            print("Saving gif... ", end="")
-            gif_path = self.config.gif_dir
-            save_path = os.path.join(gif_path, gif+'.gif')
-            write_gif(np.array(frames), save_path, fps=1/0.1)
-            print("Done.")
         env.close()
