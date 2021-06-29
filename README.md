@@ -24,7 +24,7 @@ Pytorch implementation of [Mastering Atari with Discrete World Models](https://a
     - `rssm.py` recurrent state space model utils
     - `wrapper.py` gym api and pomdp wrappers for MinAtar     
 
-## Hyper-Parameter Description:
+## Hyper-Parameter description:
 
 Since there are many hyper-parameters, I am sharing my understanding, based on the experiments and reading related papers, on some of them.<br>
 - `train_every`: Number of frames to skip while training.
