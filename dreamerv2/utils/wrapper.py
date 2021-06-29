@@ -1,4 +1,3 @@
-from dreamerv2.models.pixel import ObsDecoder
 import minatar
 import gym
 import numpy as np
@@ -42,14 +41,52 @@ class GymMinAtar(gym.Env):
 
 class breakoutPOMDP(gym.ObservationWrapper):
     def __init__(self, env):
+        '''index 2 (trail) is removed, which gives ball's direction'''
         super(breakoutPOMDP, self).__init__(env)
         c,h,w = env.observation_space.shape
-        self.observation_space = gym.spaces.MultiBinary((3,h,w))
+        self.observation_space = gym.spaces.MultiBinary((c-1,h,w))
 
     def observation(self, observation):
-        #index 2 is trail, which gives ball's direction
         return np.stack([observation[0], observation[1], observation[3]], axis=0)
+    
+class asterixPOMDP(gym.ObservationWrapper):
+    '''index 2 (trail) is removed, which gives ball's direction'''
+    def __init__(self, env):
+        super(asterixPOMDP, self).__init__(env)
+        c,h,w = env.observation_space.shape
+        self.observation_space = gym.spaces.MultiBinary((c-1,h,w))
+    
+    def observation(self, observation):
+        return np.stack([observation[0], observation[1], observation[3]], axis=0)
+    
+class freewayPOMDP(gym.ObservationWrapper):
+    '''index 2-6 (trail and speed) are removed, which gives cars' speed and direction'''
+    def __init__(self, env):
+        super(freewayPOMDP, self).__init__(env)
+        c,h,w = env.observation_space.shape
+        self.observation_space = gym.spaces.MultiBinary((c-5,h,w))
+    
+    def observation(self, observation):
+        return np.stack([observation[0], observation[1]], axis=0)    
+
+class space_invadersPOMDP(gym.ObservationWrapper):
+    '''index 2-3 (trail) are removed, which gives aliens' direction'''
+    def __init__(self, env):
+        super(space_invadersPOMDP, self).__init__(env)
+        c,h,w = env.observation_space.shape
+        self.observation_space = gym.spaces.MultiBinary((c-2,h,w))
+    def observation(self, observation):
+        return np.stack([observation[0], observation[1], observation[4], observation[5]], axis=0)
+
+class seaquestPOMDP(gym.ObservationWrapper):
+    '''index 3 (trail) is removed, which gives enemy and driver's direction'''
+    def __init__(self, env):
+        super(asterixPOMDP, self).__init__(env)
+        c,h,w = env.observation_space.shape
+        self.observation_space = gym.spaces.MultiBinary((c-1,h,w))
         
+    def observation(self, observation):
+        return np.stack([observation[0], observation[1], observation[2], observation[4], observation[5], observation[6], observation[7], observation[8], observation[9]], axis=0)    
 
 class ActionRepeat(gym.Wrapper):
     def __init__(self, env, repeat=1):
