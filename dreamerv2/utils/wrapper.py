@@ -81,7 +81,7 @@ class space_invadersPOMDP(gym.ObservationWrapper):
 class seaquestPOMDP(gym.ObservationWrapper):
     '''index 3 (trail) is removed, which gives enemy and driver's direction'''
     def __init__(self, env):
-        super(asterixPOMDP, self).__init__(env)
+        super(seaquestPOMDP, self).__init__(env)
         c,h,w = env.observation_space.shape
         self.observation_space = gym.spaces.MultiBinary((c-1,h,w))
         
