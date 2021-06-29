@@ -31,7 +31,7 @@ Pytorch implementation of [Mastering Atari with Discrete World Models](https://a
   ``` 
   - Training curves are logged using wandb. 
   - A `results` folder will be localy created locally to store models while training.
-    - `/env_name+_env_id_+pomdp`   
+    - `/env_name+_env_id_+pomdp/models`   
 
 2) Experimenting on other environments(using gym-api) can be done by adding another hyper-parameter dataclass in [config.py](https://github.com/RajGhugare19/dreamerv2/blob/b6d65b8af7f91ae106c5b0cc11e29a2247dfa233/dreamerv2/training/config.py#L9). <br>
 
