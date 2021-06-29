@@ -23,7 +23,16 @@ Pytorch implementation of [Mastering Atari with Discrete World Models](https://a
     - `module.py` neural network parameters utils
     - `rssm.py` recurrent state space model utils
     - `wrapper.py` gym api and pomdp wrappers for MinAtar     
- 
+
+## Hyper-Parameter Description:
+
+Since there are many hyper-parameters, I am sharing my understanding, based on the experiments and reading related papers, on some of them.<br>
+- `train_every`: Number of frames to skip while training.
+- `collect_intervals`: Number of batches to be sampled from buffer, at every "train-every" iteration.
+- `seq_len`: length of trajectory sequence to be sampled from buffer.
+- `embedding_size`: size of embedding vector that is output by observation encoder.
+- `rssm_node_size`: hidden size of temporal posteriors and priors.
+
 ## Running experiments
 1) In tests folder, mdp.py and pomdp.py have been setup for experiments with MinAtar environments. All default hyper-parameters used, are stored in a dataclass in [config.py](https://github.com/RajGhugare19/dreamerv2/blob/b6d65b8af7f91ae106c5b0cc11e29a2247dfa233/dreamerv2/training/config.py#L9). To run dreamerv2 with default HPs on POMDP breakout and cuda device :
   ```
