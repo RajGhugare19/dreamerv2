@@ -51,7 +51,7 @@ Since there are many hyper-parameters, I am sharing my understanding, based on t
 - `class_size`: number of classes for each categorical random variable
 - `category_size`: number of categorical random variables.
 - `horizon`: horizon for imagination in future latent state space.
-- `kl_balance_scale`: scale for kl balancing
+- `kl_balance_scale`: scale for kl balancing.
 - `actor_entropy_scale` scale for policy entropy regularization in latent state space.
 
 ## Acknowledgments
