@@ -65,7 +65,7 @@ Awesome Environments used for testing:
 
 This code is heavily inspired by the following works:
 
-- danijar's (author of Dreamer-v2) Tensorflow implementation : [https://github.com/danijar/dreamer](https://github.com/danijar/dreamer)<br>
+- danijar's Dreamer-v2 tensorflow implementation : [https://github.com/danijar/dreamer](https://github.com/danijar/dreamer)<br>
 - juliusfrost's Dreamer-v1 pytorch implementation : [https://github.com/juliusfrost/dreamer-pytorch](https://github.com/juliusfrost/dreamer-pytorch)<br>
 - yusukeurakami's Dreamer-v1 pytorch implementation: [https://github.com/yusukeurakami/dreamer-pytorch](https://github.com/yusukeurakami/dreamer-pytorch)<br>
 - alec-tschantz's  PlaNet pytorch implementation : [https://github.com/alec-tschantz/planet](https://github.com/alec-tschantz/planet)<br>
