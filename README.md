@@ -16,7 +16,7 @@ Pytorch implementation of [Mastering Atari with Discrete World Models](https://a
 ## Evaluating saved models
 TO-DO
 
-## Training curves
+## Evaluation Results and training curves
 All experiments were logged using wandb. Training runs for all MDP and POMDP variants of MinAtar environments can be found on the [wandb project](https://wandb.ai/raj19/mastering%20MinAtar%20with%20world%20models?workspace=user-raj19) page.
 
 ## Code structure:
