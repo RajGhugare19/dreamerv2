@@ -61,6 +61,7 @@ Since there are many hyper-parameters, I am sharing my understanding, based on t
 Awesome Environments used for testing:
 
 - MinAtar by kenjyoung : [https://github.com/kenjyoung/MinAtar](https://github.com/kenjyoung/MinAtar)<br>
+- qlan3's gym-games : [https://github.com/qlan3/gym-games](https://github.com/qlan3/gym-games)
 - minigrid by maximecb : [https://github.com/maximecb/gym-minigrid](https://github.com/maximecb/gym-minigrid)<br>
 
 This code is heavily inspired by the following works:
@@ -69,6 +70,5 @@ This code is heavily inspired by the following works:
 - juliusfrost's Dreamer-v1 pytorch implementation : [https://github.com/juliusfrost/dreamer-pytorch](https://github.com/juliusfrost/dreamer-pytorch)<br>
 - yusukeurakami's Dreamer-v1 pytorch implementation: [https://github.com/yusukeurakami/dreamer-pytorch](https://github.com/yusukeurakami/dreamer-pytorch)<br>
 - alec-tschantz's  PlaNet pytorch implementation : [https://github.com/alec-tschantz/planet](https://github.com/alec-tschantz/planet)<br>
-- qlan3's gym-games : [https://github.com/qlan3/gym-games](https://github.com/qlan3/gym-games)
 
 This project was done as a part of my research internship at [Ola Electric](https://www.olaelectric.com/). Thanks [@sreakdgeek](https://github.com/sreakdgeek) for providing helpful guidance and resources.
