@@ -60,7 +60,7 @@ Awesome Environments used for testing:
 - MinAtar by kenjyoung : [https://github.com/kenjyoung/MinAtar](https://github.com/kenjyoung/MinAtar)<br>
 - minigrid by maximecb : [https://github.com/maximecb/gym-minigrid](https://github.com/maximecb/gym-minigrid)<br>
 
-This code is built on and heavily inspired by the following works:
+This code is heavily inspired by the following works:
 
 - danijar's (author of Dreamer-v2) Tensorflow implementation : [https://github.com/danijar/dreamer](https://github.com/danijar/dreamer)<br>
 - juliusfrost's Dreamer-v1 pytorch implementation : [https://github.com/juliusfrost/dreamer-pytorch](https://github.com/juliusfrost/dreamer-pytorch)<br>
@@ -68,4 +68,4 @@ This code is built on and heavily inspired by the following works:
 - alec-tschantz's  PlaNet pytorch implementation : [https://github.com/alec-tschantz/planet](https://github.com/alec-tschantz/planet)<br>
 - qlan3's gym-games : [https://github.com/qlan3/gym-games](https://github.com/qlan3/gym-games)
 
-Thanks for all the great work :)
+This project was done as a part of my research internship at [Ola Electric](https://www.olaelectric.com/). Thanks [@sreakdgeek](https://github.com/sreakdgeek) for providing helpful guidance and resources.
