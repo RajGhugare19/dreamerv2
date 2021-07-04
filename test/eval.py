@@ -51,12 +51,10 @@ def main(args):
         eval_episode=args.eval_episode,
     )
 
-    config_dict = config.__dict__
-    trainer = Trainer(config, device)
     evaluator = Evaluator(config, device)
     best_score = 0
     best_model = 'best'
-    print(model_dir)
+    
     for f in sorted(os.listdir(model_dir)):
         eval_score = evaluator.eval_saved_agent(env,  os.path.join(model_dir, f))
         if eval_score > best_score:
@@ -65,6 +63,7 @@ def main(args):
             best_score=eval_score
 
     print('best evaluation score amongst stored models is : ', best_score)
+    print('model with best evaluation score is : ', best_model)
 
 if __name__ == "__main__":
 
