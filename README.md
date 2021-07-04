@@ -3,7 +3,7 @@
 Pytorch implementation of [Mastering Atari with Discrete World Models](https://arxiv.org/abs/2010.02193)<br>
 
 ## Running experiments
-1) In tests folder, mdp.py and pomdp.py have been setup for experiments with MinAtar environments. All default hyper-parameters used, are stored in a dataclass in [config.py](https://github.com/RajGhugare19/dreamerv2/blob/b6d65b8af7f91ae106c5b0cc11e29a2247dfa233/dreamerv2/training/config.py#L9). To run dreamerv2 with default HPs on POMDP breakout and cuda device :
+1) In tests folder, mdp.py and pomdp.py have been setup for experiments with MinAtar environments. All default hyper-parameters used are stored in a dataclass in [config.py](https://github.com/RajGhugare19/dreamerv2/blob/b6d65b8af7f91ae106c5b0cc11e29a2247dfa233/dreamerv2/training/config.py#L9). To run dreamerv2 with default HPs on POMDP breakout and cuda :
   ```
   python pomdp.py --env breakout --device cuda
   ``` 
@@ -15,6 +15,9 @@ Pytorch implementation of [Mastering Atari with Discrete World Models](https://a
 
 ## Evaluating saved models
 TO-DO
+
+## Evaluation Results and training curves
+All experiments were logged using wandb. Training runs for all MDP and POMDP variants of MinAtar environments can be found on the [wandb project](https://wandb.ai/raj19/mastering%20MinAtar%20with%20world%20models?workspace=user-raj19) page.
 
 ## Code structure:
 - `test`
@@ -51,21 +54,21 @@ Since there are many hyper-parameters, I am sharing my understanding, based on t
 - `class_size`: number of classes for each categorical random variable
 - `category_size`: number of categorical random variables.
 - `horizon`: horizon for imagination in future latent state space.
-- `kl_balance_scale`: scale for kl balancing
-- `actor_entropy_scale` scale for entropy regularization in latent state space.
+- `kl_balance_scale`: scale for kl balancing.
+- `actor_entropy_scale` scale for policy entropy regularization in latent state space.
 
 ## Acknowledgments
 Awesome Environments used for testing:
 
 - MinAtar by kenjyoung : [https://github.com/kenjyoung/MinAtar](https://github.com/kenjyoung/MinAtar)<br>
+- qlan3's gym-games : [https://github.com/qlan3/gym-games](https://github.com/qlan3/gym-games)
 - minigrid by maximecb : [https://github.com/maximecb/gym-minigrid](https://github.com/maximecb/gym-minigrid)<br>
 
-This code is built on and heavily inspired by the following works:
+This code is heavily inspired by the following works:
 
-- danijar's (author of Dreamer-v2) Tensorflow implementation : [https://github.com/danijar/dreamer](https://github.com/danijar/dreamer)<br>
+- danijar's Dreamer-v2 tensorflow implementation : [https://github.com/danijar/dreamer](https://github.com/danijar/dreamer)<br>
 - juliusfrost's Dreamer-v1 pytorch implementation : [https://github.com/juliusfrost/dreamer-pytorch](https://github.com/juliusfrost/dreamer-pytorch)<br>
 - yusukeurakami's Dreamer-v1 pytorch implementation: [https://github.com/yusukeurakami/dreamer-pytorch](https://github.com/yusukeurakami/dreamer-pytorch)<br>
 - alec-tschantz's  PlaNet pytorch implementation : [https://github.com/alec-tschantz/planet](https://github.com/alec-tschantz/planet)<br>
-- qlan3's gym-games : [https://github.com/qlan3/gym-games](https://github.com/qlan3/gym-games)
 
-Thanks for all the great work :)
+This project was done as a part of my research internship at [Ola Electric](https://www.olaelectric.com/). Thanks [@sreakdgeek](https://github.com/sreakdgeek) for providing helpful guidance and resources.
