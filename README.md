@@ -1,4 +1,4 @@
-# Mastering Mini Atari with Discrete World Models
+# World Models
 
 Pytorch implementation of [Mastering Atari with Discrete World Models](https://arxiv.org/abs/2010.02193)<br>
 
