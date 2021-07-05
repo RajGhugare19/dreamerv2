@@ -1,3 +1,5 @@
+## Dreamer- v2 Pytorch
+
 Pytorch implementation of [Mastering Atari with Discrete World Models](https://arxiv.org/abs/2010.02193)<br>
 
 ## Running experiments
