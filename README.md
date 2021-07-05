@@ -1,4 +1,4 @@
-# Mastering Mini Atari with Discrete World Models
+## Dreamer- v2 Pytorch
 
 Pytorch implementation of [Mastering Atari with Discrete World Models](https://arxiv.org/abs/2010.02193)<br>
 
@@ -16,7 +16,16 @@ Pytorch implementation of [Mastering Atari with Discrete World Models](https://a
 ## Evaluating saved models
 TO-DO
 
-## Evaluation Results and training curves
+## Evaluation Results
+
+Average evaluation score of models saved at every 0.1 million frames. Green curves correspond to agent which have access to complete information, while red curves correspond to agents trained with partial observability.
+
+<img src="test/results/eval.png" width="5000" height="400">
+
+In freeway, the agent gets stuck in a local maxima, wherein it learns to always move forward. The reason being that it is not penalised for crashing into cars. Probably due to policy entropy regularisation, its returns drop drastically around the 1 million frame mark, and gradually improve while maintaing the policy entropy.
+
+## Training curves
+
 All experiments were logged using wandb. Training runs for all MDP and POMDP variants of MinAtar environments can be found on the [wandb project](https://wandb.ai/raj19/mastering%20MinAtar%20with%20world%20models?workspace=user-raj19) page.
 
 ## Code structure:
