@@ -3,10 +3,10 @@
 Pytorch implementation of [Mastering Atari with Discrete World Models](https://arxiv.org/abs/2010.02193)<br>
 
 <p align="middle" >
-  <img src="test/results/images/breakout.gif" width="400" />
-  <img src="test/results/images/space_invaders.gif" width="400" /> 
-  <img src="test/results/images/asterix.gif" width="400" />
-  <img src="test/results/images/seaquest.gif" width="400" /> 
+  <img src="test/results/images/breakout.gif" title="breakout" width="400" />
+  <img src="test/results/images/space_invaders.gif" title="space_invaders" width="400" /> 
+  <img src="test/results/images/asterix.gif" title="asterix" width="400" />
+  <img src="test/results/images/seaquest.gif" title="seaquest" width="400" /> 
 </p>
 
 ## Running experiments
