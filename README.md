@@ -22,7 +22,7 @@ Average evaluation score of models saved at every 0.1 million frames. Green curv
 
 <img src="test/results/eval.png" width="5000" height="400">
 
-In freeway, the agent gets stuck in a local maxima, wherein it learns to always move forward. The reason being that it is not penalised for crashing into cars. Probably to policy entropy regularisation, its returns drop drastically around the 1 million frame mark, and gradually improve while maintaing the policy entropy.
+In freeway, the agent gets stuck in a local maxima, wherein it learns to always move forward. The reason being that it is not penalised for crashing into cars. Probably due to policy entropy regularisation, its returns drop drastically around the 1 million frame mark, and gradually improve while maintaing the policy entropy.
 
 ## Training curves
 
