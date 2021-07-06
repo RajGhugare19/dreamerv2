@@ -21,7 +21,8 @@ Pytorch implementation of [Mastering Atari with Discrete World Models](https://a
 2) Experimenting on other environments(using gym-api) can be done by adding another hyper-parameter dataclass in [config.py](https://github.com/RajGhugare19/dreamerv2/blob/b6d65b8af7f91ae106c5b0cc11e29a2247dfa233/dreamerv2/training/config.py#L9). <br>
 
 ## Evaluating saved models
-TO-DO
+
+Trained models for all 5 games (mdp and pomdp version of each) are uploaded to the drive link: [link](https://drive.google.com/file/d/11200qHbwKRjfe3xRI_G6nyYaZRBFt8_k/view?usp=sharing)
 
 ## Evaluation Results
 
