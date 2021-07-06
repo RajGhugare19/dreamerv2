@@ -40,7 +40,7 @@ All experiments were logged using wandb. Training runs for all MDP and POMDP var
   - `pomdp.py` run MinAtar experiments with partial observability.
   - `mdp.py` run MinAtar experiments.
   - `eval.y` evaluate saved agents.
-- `dreamerv2` dreamerv2 plus dreamerv1 and combinations thereof.
+- `dreamerv2` dreamerv2 plus dreamerv1 and their combinations.
   - `models` neural network models.
     - `actor.py` discrete action model.
     - `dense.py` fully connected neural networks.
@@ -48,18 +48,17 @@ All experiments were logged using wandb. Training runs for all MDP and POMDP var
     - `rssm.py` recurrent state space model.
   - `training`
     - `config.py` hyper-parameter dataclass.
-    - `trainer.py` training class.
+    - `trainer.py` training class, loss calculation.
     - `evaluator.py` evaluation class.
   - `utils`
     - `algorithm.py` lambda return function.
-    - `buffer.py` replay buffers.
-    - `module.py` neural network parameters utils
-    - `rssm.py` recurrent state space model utils
-    - `wrapper.py` gym api and pomdp wrappers for MinAtar     
+    - `buffer.py` replay buffers, batches of sequences.
+    - `module.py` neural network parameters utils.
+    - `rssm.py` recurrent state space model utils.
+    - `wrapper.py` gym api and pomdp wrappers for MinAtar.     
 
 ## Hyper-Parameter description:
 
-Since there are many hyper-parameters, I am sharing my understanding, based on the experiments and reading related papers, on some of them.<br>
 - `train_every`: number of frames to skip while training.
 - `collect_intervals`: number of batches to be sampled from buffer, at every "train-every" iteration.
 - `seq_len`: length of trajectory sequence to be sampled from buffer.
