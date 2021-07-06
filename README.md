@@ -35,6 +35,8 @@ In freeway, the agent gets stuck in a local maxima, wherein it learns to always 
 
 All experiments were logged using wandb. Training runs for all MDP and POMDP variants of MinAtar environments can be found on the [wandb project](https://wandb.ai/raj19/mastering%20MinAtar%20with%20world%20models?workspace=user-raj19) page.
 
+Please create an issue if you find a bug or have any queries.
+
 ## Code structure:
 - `test`
   - `pomdp.py` run MinAtar experiments with partial observability.
@@ -71,6 +73,7 @@ All experiments were logged using wandb. Training runs for all MDP and POMDP var
 - `horizon`: horizon for imagination in future latent state space.
 - `kl_balance_scale`: scale for kl balancing.
 - `actor_entropy_scale` scale for policy entropy regularization in latent state space.
+
 
 ## Acknowledgments
 Awesome Environments used for testing:
