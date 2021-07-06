@@ -22,7 +22,7 @@ Pytorch implementation of [Mastering Atari with Discrete World Models](https://a
 
 ## Evaluating saved models
 
-Trained models for all 5 games (mdp and pomdp version of each) are uploaded to the drive link: [link](https://drive.google.com/file/d/11200qHbwKRjfe3xRI_G6nyYaZRBFt8_k/view?usp=sharing)
+Trained models for all 5 games (mdp and pomdp version of each) are uploaded to the drive link: [link](https://drive.google.com/file/d/11200qHbwKRjfe3xRI_G6nyYaZRBFt8_k/view?usp=sharing) (64 MBs)
 
 ## Evaluation Results
 
