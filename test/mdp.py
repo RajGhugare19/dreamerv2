@@ -42,7 +42,6 @@ def main(args):
         seq_len = seq_len,
         batch_size = batch_size,
         model_dir=model_dir, 
-        eval_render=args.eval_render,
     )
 
     config_dict = config.__dict__
@@ -121,6 +120,5 @@ if __name__ == "__main__":
     parser.add_argument('--device', default='cuda', help='CUDA or CPU')
     parser.add_argument('--batch_size', type=int, default=50, help='Batch size')
     parser.add_argument('--seq_len', type=int, default=50, help='Sequence Length (chunk length)')
-    parser.add_argument('--eval_render', default=False, help='render while evaluating best model')
     args = parser.parse_args()
     main(args)

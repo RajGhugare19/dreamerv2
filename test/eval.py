@@ -17,14 +17,22 @@ pomdp_wrappers = {
 }
 
 def main(args):
+    print(args)
     env_name = args.env
-    if args.pomdp:
+    if args.pomdp==1:
         exp_id = args.id + '_pomdp'
         PomdpWrapper = pomdp_wrappers[env_name]
         env = PomdpWrapper(OneHotAction(GymMinAtar(env_name)))
+        print('using partial state info')
     else:
         exp_id = args.id
         env = OneHotAction(GymMinAtar(env_name))
+        print('using complete state info')
+    
+    if args.eval_episode == 1:
+        eval_render = True
+    else:
+        eval_render = False
 
     if torch.cuda.is_available() and args.device:
         device = torch.device('cuda')
@@ -35,7 +43,6 @@ def main(args):
     result_dir = os.path.join('results', '{}_{}'.format(env_name, exp_id))
     model_dir = os.path.join(result_dir, 'models')                           
 
-    
     obs_shape = env.observation_space.shape
     action_size = env.action_space.shape[0]
     obs_dtype = bool 
@@ -49,21 +56,19 @@ def main(args):
         action_dtype = action_dtype,
         model_dir=model_dir, 
         eval_episode=args.eval_episode,
+        eval_render=eval_render
     )
 
     evaluator = Evaluator(config, device)
     best_score = 0
-    best_model = 'best'
     
     for f in sorted(os.listdir(model_dir)):
         eval_score = evaluator.eval_saved_agent(env,  os.path.join(model_dir, f))
         if eval_score > best_score:
             print('..saving model number')
-            best_model = f
             best_score=eval_score
 
-    print('best evaluation score amongst stored models is : ', best_score)
-    print('model with best evaluation score is : ', best_model)
+    print('best mean evaluation score amongst stored models is : ', best_score)
 
 if __name__ == "__main__":
 
@@ -72,8 +77,8 @@ if __name__ == "__main__":
     parser.add_argument("--env", type=str, help='mini atari env name')
     parser.add_argument('--eval_episode', type=int, default=10, help='number of episodes to eval')
     parser.add_argument("--id", type=str, default='0', help='Experiment ID')
-    parser.add_argument("--pomdp", type=bool, default=False, help='partial observation flag')
-    parser.add_argument('--seed', type=int, default=123, help='Random seed')
+    parser.add_argument("--eval_render", type=int, help='to render while evaluation')
+    parser.add_argument("--pomdp", type=int, help='partial observation flag')
     parser.add_argument('--device', default='cuda', help='CUDA or CPU')
     args = parser.parse_args()
     main(args)
