@@ -83,6 +83,7 @@ Please create an issue if you find a bug or have any queries.
 - `collect_intervals`: number of batches to be sampled from buffer, at every "train-every" iteration.
 - `seq_len`: length of trajectory sequence to be sampled from buffer.
 - `embedding_size`: size of embedding vector that is output by observation encoder.
+- `rssm_type`: categorical or gaussian random variables for stochastic states.
 - `rssm_node_size`: size of hidden layers of temporal posteriors and priors.
 - `deter_size`: size of deterministic part of recurrent state.
 - `stoch_size`: size of stochastic part of recurrent state.
