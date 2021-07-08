@@ -21,16 +21,19 @@ def main(args):
     wandb.login()
     env_name = args.env
     exp_id = args.id + '_pomdp'
+
     '''make dir for saving results'''
     result_dir = os.path.join('results', '{}_{}'.format(env_name, exp_id))
     model_dir = os.path.join(result_dir, 'models')                                                  #dir to save learnt models
     os.makedirs(model_dir, exist_ok=True)
 
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
     if torch.cuda.is_available() and args.device:
         device = torch.device('cuda')
+        torch.cuda.manual_seed(args.seed)
     else:
         device = torch.device('cpu')
-
     print('using :', device)  
 
     PomdpWrapper = pomdp_wrappers[env_name]

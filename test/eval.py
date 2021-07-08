@@ -5,7 +5,6 @@ import numpy as np
 import gym
 from dreamerv2.utils.wrapper import GymMinAtar, OneHotAction, breakoutPOMDP, space_invadersPOMDP, seaquestPOMDP, asterixPOMDP, freewayPOMDP
 from dreamerv2.training.config import MinAtarConfig
-from dreamerv2.training.trainer import Trainer
 from dreamerv2.training.evaluator import Evaluator
 
 pomdp_wrappers = {

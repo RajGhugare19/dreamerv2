@@ -19,8 +19,11 @@ def main(args):
     model_dir = os.path.join(result_dir, 'models')                                                  #dir to save learnt models
     os.makedirs(model_dir, exist_ok=True)
 
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
     if torch.cuda.is_available() and args.device:
         device = torch.device('cuda')
+        torch.cuda.manual_seed(args.seed)
     else:
         device = torch.device('cpu')
     print('using :', device)  
