@@ -74,3 +74,4 @@ class Evaluator(object):
             eval_scores.append(score)
         print('average evaluation score for model at ' + model_path + ' = ' +str(np.mean(eval_scores)))
         env.close()
+        return np.mean(eval_scores)
