@@ -26,8 +26,8 @@ I think it is easier to create a new conda environment(or venv etc.) and manuall
   python pomdp.py --env breakout --device cuda
   ``` 
   - Training curves are logged using wandb. 
-  - A `results` folder will be created locally to store models while training at:
-  `test/env_name+'_'+env_id+'_'+pomdp/models`   
+  - A `results` folder will be created locally to store models while training:
+  `test/results/env_name+'_'+env_id+'_'+pomdp/models`   
 
 2) Experimenting on other environments(using gym-api) can be done by adding another hyper-parameter dataclass in [config.py](https://github.com/RajGhugare19/dreamerv2/blob/b6d65b8af7f91ae106c5b0cc11e29a2247dfa233/dreamerv2/training/config.py#L9). <br>
 
