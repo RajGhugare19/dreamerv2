@@ -90,7 +90,7 @@ Please create an issue if you find a bug or have any queries.
 - `category_size`: number of categorical random variables.
 - `horizon`: horizon for imagination in future latent state space.
 - `kl_balance_scale`: scale for kl balancing.
-- `actor_entropy_scale` scale for policy entropy regularization in latent state space.
+- `actor_entropy_scale`: scale for policy entropy regularization in latent state space.
 
 
 ## Acknowledgments
