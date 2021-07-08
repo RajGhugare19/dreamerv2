@@ -3,10 +3,10 @@
 Pytorch implementation of [Mastering Atari with Discrete World Models](https://arxiv.org/abs/2010.02193)<br>
 
 <p align="middle" >
-  <img src="test/results/images/breakout.gif" title="breakout" width="200" />
-  <img src="test/results/images/space_invaders.gif" title="space_invaders" width="200" /> 
-  <img src="test/results/images/asterix.gif" title="asterix" width="200" />
-  <img src="test/results/images/seaquest.gif" title="seaquest" width="200" /> 
+  <img src="images/breakout.gif" title="breakout" width="200" />
+  <img src="images/space_invaders.gif" title="space_invaders" width="200" /> 
+  <img src="images/asterix.gif" title="asterix" width="200" />
+  <img src="images/seaquest.gif" title="seaquest" width="200" /> 
 </p>
 
 ## Running experiments
@@ -28,7 +28,7 @@ Trained models for all 5 games (mdp and pomdp version of each) are uploaded to t
 
 Average evaluation score of models saved at every 0.1 million frames. Green curves correspond to agent which have access to complete information, while red curves correspond to agents trained with partial observability.
 
-<img src="test/results/images/eval.png" width="5000" height="400">
+<img src="images/eval.png" width="5000" height="400">
 
 In freeway, the agent gets stuck in a local maxima, wherein it learns to always move forward. The reason being that it is not penalised for crashing into cars. Probably due to policy entropy regularisation, its returns drop drastically around the 1 million frame mark, and gradually improve while maintaing the policy entropy.
 
