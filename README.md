@@ -25,7 +25,7 @@ Pytorch implementation of [Mastering Atari with Discrete World Models](https://a
 Trained models for all 5 games (mdp and pomdp version of each) are uploaded to the drive link: [link](https://drive.google.com/file/d/11200qHbwKRjfe3xRI_G6nyYaZRBFt8_k/view?usp=sharing) (64 MBs)<br>
 Download and unzip the models inside /test directory.
 
-Evaluate the saved model for POMDP version of breakout environment for 5 episodes, without rendering.
+Evaluate the saved model for POMDP version of breakout environment for 5 episodes, without rendering:
 ```
 python eval.py --env breakout --eval_episode 5 --eval_render 0 --pomdp 1
 ```
