@@ -32,7 +32,7 @@ python eval.py --env breakout --eval_episode 5 --eval_render 0 --pomdp 1
 
 ## Evaluation Results
 
-Average evaluation score of models saved at every 0.1 million frames. Green curves correspond to agent which have access to complete information, while red curves correspond to agents trained with partial observability.
+Average evaluation score(over 50 evaluation episodes) of models saved at every 0.1 million frames. Green curves correspond to agent which have access to complete information, while red curves correspond to agents trained with partial observability.
 
 <img src="images/eval.png" width="5000" height="400">
 
