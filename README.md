@@ -17,7 +17,7 @@ Dependencies:
 * [MinAtar](https://github.com/kenjyoung/MinAtar)
 * [Wandb](https://wandb.ai/) 
 
-I have added requirements.txt using `conda list -e > requirements.txt` and environment.yml using `conda env export > environment.yml` in my own conda environment.
+I have added requirements.txt using `conda list -e > requirements.txt` and environment.yml using `conda env export > environment.yml` from my own conda environment. <br>
 I think it is easier to create a new conda environment and manually install the above listed few dependencies one by one.
 
 ## Running experiments
