@@ -9,6 +9,17 @@ Pytorch implementation of [Mastering Atari with Discrete World Models](https://a
   <img src="images/seaquest.gif" title="seaquest" width="200" /> 
 </p>
 
+## Installation
+
+Dependencies:
+* [Pytorch](https://pytorch.org/)
+* [Gym](https://github.com/openai/gym)
+* [MinAtar](https://github.com/kenjyoung/MinAtar)
+* [Wandb](https://wandb.ai/) 
+
+I have added requirements.txt using `conda list -e > requirements.txt` and environment.yml using `conda env export > environment.yml` in my own conda environment.
+I think it is easier to create a new conda environment and manually install the above listed few dependencies one by one.
+
 ## Running experiments
 1) In tests folder, mdp.py and pomdp.py have been setup for experiments with MinAtar environments. All default hyper-parameters used are stored in a dataclass in [config.py](https://github.com/RajGhugare19/dreamerv2/blob/b6d65b8af7f91ae106c5b0cc11e29a2247dfa233/dreamerv2/training/config.py#L9). To run dreamerv2 with default HPs on POMDP breakout and cuda :
   ```
