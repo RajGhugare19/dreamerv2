@@ -107,5 +107,6 @@ This code is heavily inspired by the following works:
 - juliusfrost's Dreamer-v1 pytorch implementation : [https://github.com/juliusfrost/dreamer-pytorch](https://github.com/juliusfrost/dreamer-pytorch)<br>
 - yusukeurakami's Dreamer-v1 pytorch implementation: [https://github.com/yusukeurakami/dreamer-pytorch](https://github.com/yusukeurakami/dreamer-pytorch)<br>
 - alec-tschantz's  PlaNet pytorch implementation : [https://github.com/alec-tschantz/planet](https://github.com/alec-tschantz/planet)<br>
+- Kaixhin's PlaNet pytorcg implementation : [https://github.com/Kaixhin/PlaNet](https://github.com/Kaixhin/PlaNet)
 
 This project was done as a part of my research internship at [Ola Electric](https://www.olaelectric.com/). Thanks [@sreakdgeek](https://github.com/sreakdgeek) for providing helpful guidance and resources.
