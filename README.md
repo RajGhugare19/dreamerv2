@@ -58,7 +58,7 @@ Please create an issue if you find a bug or have any queries.
 ## Code structure:
 - `test`
   - `pomdp.py` run MinAtar experiments with partial observability.
-  - `mdp.py` run MinAtar experiments.
+  - `mdp.py` run MinAtar experiments with complete observability.
   - `eval.y` evaluate saved agents.
 - `dreamerv2` dreamerv2 plus dreamerv1 and their combinations.
   - `models` neural network models.
