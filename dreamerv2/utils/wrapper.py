@@ -145,18 +145,3 @@ class OneHotAction(gym.Wrapper):
         reference = np.zeros(actions, dtype=np.float32)
         reference[index] = 1.0
         return reference
-
-class ActionRepeat(gym.Wrapper):
-    def __init__(self, env, repeat=1):
-        super(ActionRepeat, self).__init__(env)
-        self.repeat = repeat
-
-    def step(self, action):
-        done = False
-        total_reward = 0
-        current_step = 0
-        while current_step < self.repeat and not done:
-            obs, reward, done, info = self.env.step(action)
-            total_reward += reward
-            current_step += 1
-        return obs, total_reward, done, info
