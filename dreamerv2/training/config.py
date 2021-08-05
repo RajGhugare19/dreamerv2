@@ -49,7 +49,7 @@ class MinAtarConfig():
     kl: Dict = field(default_factory=lambda:{'use_kl_balance':True, 'kl_balance_scale':0.8, 'use_free_nats':False, 'free_nats':0.0})
     use_slow_target: float = True
     slow_target_update: int = 100
-    slow_target_fraction: float = 1.04
+    slow_target_fraction: float = 1.00
 
     #actor critic
     actor: Dict = field(default_factory=lambda:{'layers':3, 'node_size':100, 'dist':'one_hot', 'min_std':1e-4, 'init_std':5, 'mean_scale':5, 'activation':nn.ELU})
