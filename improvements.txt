@@ -1,0 +1,12 @@
+Hey Raj. Good work. 
+See if you could consider the following criticisms/improvements i suggest, me being 15+ years more experieced than you. :)
+
+Upon close inspection of the model, we can detect the presence of an undesirable smell lingering within the enviromment. 
+The smell is accompanyied by a loud noise(>= 10 db) which is heard 2 to 3 times(pr prr prrrr). Our RL model labels this occurence as a fart, 
+and upon playing with a few more parameters, we can speculate that it must be produced by some human, possibly un-intentionally. The human seems to be
+of a royal origin, probably belonging to royal clans like King, Rajput, Maharana, or MAHARAJ. Here intuition helps us make the final choice and conclude,
+
+    Maharaj farted ...................... English
+    maharaj se tiró un pedo ............. Spanish
+    marajá peidou........................ Portuguese
+    MAHARAJ PAADA ........................ Hindi
