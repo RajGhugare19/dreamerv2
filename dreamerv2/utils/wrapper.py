@@ -1,6 +1,7 @@
 import minatar
 import gym
 import numpy as np
+import torch
 
 class GymMinAtar(gym.Env):
     metadata = {'render.modes': ['human', 'rgb_array']}
@@ -48,6 +49,24 @@ class breakoutPOMDP(gym.ObservationWrapper):
 
     def observation(self, observation):
         return np.stack([observation[0], observation[1], observation[3]], axis=0)
+
+class encodingDreamer(gym.ObservationWrapper):
+    def __init__(self, env, encoder):
+        '''add dreamer encoding to observations'''
+        super(encodingDreamer, self).__init__(env)
+
+        self.encoder = encoder
+        self.observation_space = gym.spaces.Box(
+            shape=(encoder.embedding_size,), low=-np.inf, high=np.inf 
+        )
+
+    def update_encoder(self, encoder):
+        self.encoder = encoder
+
+    def observation(self, observation):
+        with torch.no_grad():
+            return self.encoder(observation)
+
     
 class asterixPOMDP(gym.ObservationWrapper):
     '''index 2 (trail) is removed, which gives ball's direction'''

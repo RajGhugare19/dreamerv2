@@ -11,6 +11,7 @@ class ObsEncoder(nn.Module):
         :param embedding_size: Supposed length of encoded vector
         """
         super(ObsEncoder, self).__init__()
+        self.emdedding_size = embedding_size
         self.shape = input_shape
         activation = info['activation']
         d = info['depth']
