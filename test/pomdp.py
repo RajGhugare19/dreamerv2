@@ -24,7 +24,7 @@ def main(args):
 
     '''make dir for saving results'''
     result_dir = os.path.join('results', '{}_{}'.format(env_name, exp_id))
-    model_dir = os.path.join(result_dir, 'models')                                                  #dir to save learnt models
+    model_dir = os.path.join(result_dir, 'models')               #dir to save learnt models
     os.makedirs(model_dir, exist_ok=True)
 
     np.random.seed(args.seed)
@@ -85,10 +85,14 @@ def main(args):
                 embed = trainer.ObsEncoder(torch.tensor(obs, dtype=torch.float32).unsqueeze(0).to(trainer.device))  
                 _, posterior_rssm_state = trainer.RSSM.rssm_observe(embed, prev_action, not done, prev_rssmstate)
                 model_state = trainer.RSSM.get_model_state(posterior_rssm_state)
+                
+                ### !11111111111111111111111111111111111111111111111111111
                 action, action_dist = trainer.ActionModel(model_state)
                 action = trainer.ActionModel.add_exploration(action, iter).detach()
                 action_ent = torch.mean(action_dist.entropy()).item()
                 episode_actor_ent.append(action_ent)
+                ### !11111111111111111111111111111111111111111111111111111
+                
 
             next_obs, rew, done, _ = env.step(action.squeeze(0).cpu().numpy())
             score += rew
@@ -134,5 +138,10 @@ if __name__ == "__main__":
     parser.add_argument('--device', default='cuda', help='CUDA or CPU')
     parser.add_argument('--batch_size', type=int, default=50, help='Batch size')
     parser.add_argument('--seq_len', type=int, default=50, help='Sequence Length (chunk length)')
+    
+    # Max parameters
+    parser.add_argument('-u', '--utility_measure', type=str, default='', help='choose utility measure')
+    parser.add_argument('--record', type=bool, default=False, help='record max actions')
+    parser.add_argument('--record', type=bool, default=False, help='record max actions')
     args = parser.parse_args()
     main(args)
