@@ -1,0 +1,11 @@
+*.buffer
+*.tsv
+send
+
+.idea/
+.ipynb_checkpoints/
+__pycache__
+
+logs/
+buffers/
+.DS_Store

@@ -51,26 +51,27 @@ class breakoutPOMDP(gym.ObservationWrapper):
         return np.stack([observation[0], observation[1], observation[3]], axis=0)
 
 class encodingDreamer(gym.ObservationWrapper):
-    def __init__(self, env, encoder):
+    def __init__(self, env, dreamertrainer):
         '''add dreamer encoding to observations'''
         super(encodingDreamer, self).__init__(env)
         # self.device = torch.device('cpu')
+        self.dreamertrainer = dreamertrainer
         self.observation_space = gym.spaces.Box(
-            shape=(encoder.embedding_size,), low=-np.inf, high=np.inf 
+            shape=(self.encoder.embedding_size,), low=-np.inf, high=np.inf 
         )
-        self.encoder = encoder
 
-    def update_encoder(self, encoder):
-        self.encoder = encoder
-        # self.encoder.to(self.device)
+    @property
+    def encoder(self):
+        return self.dreamertrainer.ObsEncoder
 
     def observation(self, observation):
         with torch.no_grad():
             # print(observation.shape, "--shape of observation before wrapper")
-            self.encoder = self.encoder.to(torch.device('cpu'))
+            encoder = self.encoder
+            encoder = encoder.to(torch.device('cpu'))
             # observation = observation.to(self.device)
-            observation = self.encoder(torch.tensor(observation, dtype=torch.float32).unsqueeze(0))
-            self.encoder = self.encoder.to(torch.device('cuda'))
+            observation = encoder(torch.tensor(observation, dtype=torch.float32).unsqueeze(0))
+            encoder = encoder.to(torch.device('cuda'))
             # print(observation.shape, "--shape of observation after wrapper")
             return observation
     

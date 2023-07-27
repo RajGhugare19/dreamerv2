@@ -82,7 +82,7 @@ class MaxActionModel(nn.Module):
         self.policy_actors = 1                               # number of parallel actors in imagination MDP
         self.policy_warm_up_episodes = 3                     # number of episodes with random actions before SAC on-policy data is collected (as a part of init)
 
-        self.policy_replay_size = int(1e7)                   # SAC replay size
+        self.policy_replay_size = int(1e6)                   # SAC replay size (was 1e7)
         self.policy_batch_size = 4096                        # SAC training batch size
         self.policy_reactive_updates = 100                   # number of SAC off-policy updates of `self.batch_size`
         self.policy_active_updates = 1                       # number of SAC on-policy updates per step in the imagination/environment
@@ -447,7 +447,8 @@ class MaxActionModel(nn.Module):
 
             time_to_checkpoint = ((self.step_num % self.checkpoint_frequency) == 0)
             if time_to_checkpoint:
-                self.checkpoint(buffer=self.buffer, step_num=self.step_num)
+                # self.checkpoint(buffer=self.buffer, step_num=self.step_num)
+                pass
 
                 # if self.record:
                 #     _run.add_artifact(video_filename)

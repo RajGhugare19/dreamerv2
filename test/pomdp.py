@@ -22,6 +22,25 @@ pomdp_wrappers = {
     'freeway':freewayPOMDP,
 }
 
+# env_name = 1
+# exp_id = 1
+# result_dir = os.path.join('results', '{}_{}'.format(env_name, exp_id))
+# model_dir = os.path.join(result_dir, 'models/models_best.pth')
+
+# saved_dict = torch.load(model_dir)
+# self.ObsEncoder.load_state_dict(saved_dict["ObsEncoder"])
+# self.ObsDecoder.load_state_dict(saved_dict["ObsDecoder"])
+
+# #learnt world-models desc
+# obs_encoder: Dict = field(default_factory=lambda:{'layers':3, 'node_size':100, 'dist': None, 'activation':nn.ELU, 'kernel':3, 'depth':16})
+# obs_decoder: Dict = field(default_factory=lambda:{'layers':3, 'node_size':100, 'dist':'normal', 'activation':nn.ELU, 'kernel':3, 'depth':16})
+# if config.pixel:
+#     self.ObsEncoder = ObsEncoder(obs_shape, embedding_size, config.obs_encoder).to(self.device).eval()
+#     self.ObsDecoder = ObsDecoder(obs_shape, modelstate_size, config.obs_decoder).to(self.device).eval()
+# else:
+#     self.ObsEncoder = DenseModel((embedding_size,), int(np.prod(obs_shape)), config.obs_encoder).to(self.device).eval()
+#     self.ObsDecoder = DenseModel(obs_shape, modelstate_size, config.obs_decoder).to(self.device).eval()
+
 def main(args):
     # wandb.login()
     wandb.init(
@@ -76,8 +95,7 @@ def main(args):
     evaluator = Evaluator(config, device)
 
     obs = env.reset()
-    encoder = trainer.ObsEncoder
-    maxtrainer = MaxActionModel(encodingDreamer(env, encoder))
+    maxtrainer = MaxActionModel(encodingDreamer(env, trainer))
 
     with wandb.init(project='mastering MinAtar with world models', config=config_dict):
         """training loop"""
