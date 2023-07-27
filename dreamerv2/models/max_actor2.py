@@ -3,7 +3,7 @@ import numpy as np
 import torch
 
 import os
-import sys
+import sys 
 from datetime import datetime
 import atexit
 import gzip
@@ -44,7 +44,8 @@ class MaxActionModel(nn.Module):
         self.n_warm_up_steps = 256                           # number of steps to populate the initial buffer, actions selected randomly
         self.n_exploration_steps = 20000                     # total number of steps (including warm up) of exploration
         self.eval_freq = 2000                                # interval in steps for evaluating models on tasks in the environment
-        self.data_buffer_size = self.n_exploration_steps + 1      # size of the data buffer (FIFO queue)
+        self.data_buffer_size = self.n_exploration_steps + 1 # size of the data buffer (FIFO queue)
+        self.policy_evaluation_batch_size = 64               # TODO in config 
 
         # infra params
         self.verbosity = 0                                   # level of logging/printing on screen
@@ -220,6 +221,8 @@ class MaxActionModel(nn.Module):
         # if self.verbosity:
         #     _log.info("... getting fresh agent")
 
+        size = len(self.buffer)
+
         self.agent = SAC(d_state=self.d_state, d_action=self.d_action, replay_size=self.policy_replay_size, 
             batch_size=self.policy_batch_size, n_updates=self.policy_active_updates, n_hidden=self.policy_n_hidden, 
             gamma=self.policy_gamma, alpha=self.policy_explore_alpha, lr=self.policy_lr, tau=self.policy_tau, env=self.mdp)
@@ -233,19 +236,19 @@ class MaxActionModel(nn.Module):
         # if self.verbosity:
         #     _log.info("... transferring exploration buffer")
 
-        size = len(self.buffer)
         for i in range(0, size, 1024):
+ 
             j = min(i + 1024, size)
             s, a = self.buffer.states[i:j], self.buffer.actions[i:j]
             ns = self.buffer.states[i:j] + self.buffer.state_deltas[i:j]
+ 
             s, a, ns = s.to(device), a.to(device), ns.to(device)
             with torch.no_grad():
-                # print(self.model)
                 mu, var = self.model.forward_all(s, a)
+ 
             r = self.utility(s, a, ns, mu, var, self.model)
-            print(s.shape, ns.shape, a.shape, r.shape)
-            # agent.replay.add(s, a, r, ns)
-            self.agent.replay.add(s, ns, a, r, np.zeros(0), [{}])
+            self.agent.replay.add_batch(s, ns, a, r, np.zeros(0), [{}])
+        
 
     def get_action(self):
         current_state = self.mdp.reset()
@@ -254,11 +257,11 @@ class MaxActionModel(nn.Module):
         # probs = action[1].detach().data.cpu().numpy()
         # policy_value = torch.mean(agent.get_state_value(current_state)).item()
         # return action, probs, mdp, agent, policy_value
+        print(f"get_action: {current_state.shape=}")
         actions, log_pi, action_probs = self.agent.actor.get_action(current_state)
-        qf1_values = self.agent.qf1(current_state)
-        qf2_values = self.agent.qf2(current_state)
-        policy_value = torch.min(qf1_values, qf2_values)
-        # TODO here we can have problems with dimentions ....
+        qf1_values = self.agent.qf1(current_state.unsqueeze(1).repeat(self.policy_evaluation_batch_size, 1, 1))
+        qf2_values = self.agent.qf2(current_state.unsqueeze(1).repeat(self.policy_evaluation_batch_size, 1, 1))
+        policy_value = torch.min(qf1_values, qf2_values).mean(dim=0).squeeze()
         return actions, action_probs, self.mdp, self.agent, policy_value
 
     def act(self, mode='explore', _run=None, _log=None):
@@ -295,6 +298,7 @@ class MaxActionModel(nn.Module):
         ep_returns = []
         best_return, best_params = -np.inf, deepcopy(self.agent.state_dict())
         for ep_i in range(policy_episodes):
+            print(f"{ep_i} policy episode")
             warm_up = True if ((ep_i < self.policy_warm_up_episodes) and fresh_agent) else False
             ep_return = self.agent.episode(env=self.mdp, warm_up=warm_up, verbosity=self.verbosity, _log=_log)
             ep_returns.append(ep_return)
@@ -379,37 +383,41 @@ class MaxActionModel(nn.Module):
         self.step_num += 1
         if self.step_num > self.n_warm_up_steps:
             action, probs, mdp, agent, policy_value = self.act(mode='explore')
+            action = action.squeeze().cpu().numpy()
+            probs = probs.detach()
 
             # _run.log_scalar("action_norm", np.sum(np.square(action)), step_num)
             # _run.log_scalar("exploration_policy_value", policy_value, step_num)
 
-            if self.action_noise_stdev:
+            if self.action_noise_stdev: # = 0
                 action = action + np.random.normal(scale=self.action_noise_stdev, size=action.shape)
         else:
             action = self.env.action_space.sample()
             probs = np.ones_like(action) / len(action)
             probs = torch.from_numpy(probs)
 
+        # print(self.env.action_space, action)
         next_state, reward, done, info = self.env.step(action)
         self.buffer.add(self.state.numpy(), action, next_state.numpy())
 
-        if self.step_num > self.n_warm_up_steps:
-            _run.log_scalar("experience_novelty", 
-            self.transition_novelty(self.state, action, next_state, model=self.model), self.step_num)
+        # if self.step_num > self.n_warm_up_steps:
+        #     _run.log_scalar("experience_novelty", 
+        #     self.transition_novelty(self.state, action, next_state, model=self.model), self.step_num)
 
-        if self.render:
-            self.env.self.render()
+        # if self.render:
+        #     self.env.self.render()
             
         if done:
-            _log.info(f"step: {self.step_num}\tepisode complete")
+            # _log.info(f"step: {self.step_num}\tepisode complete")
             self.agent = None
             self.mdp = None
 
             if self.record:
-                new_video_filename = f"{self.dump_dir}/exploration_{self.step_num}.mp4"
-                next_state = self.env.reset(filename=new_video_filename)
-                _run.add_artifact(video_filename)
-                video_filename = new_video_filename
+                # new_video_filename = f"{self.dump_dir}/exploration_{self.step_num}.mp4"
+                # next_state = self.env.reset(filename=new_video_filename)
+                # _run.add_artifact(video_filename)
+                # video_filename = new_video_filename
+                pass
             else:
                 next_state = self.env.reset()
 
@@ -441,8 +449,8 @@ class MaxActionModel(nn.Module):
             if time_to_checkpoint:
                 self.checkpoint(buffer=self.buffer, step_num=self.step_num)
 
-                if self.record:
-                    _run.add_artifact(video_filename)
+                # if self.record:
+                #     _run.add_artifact(video_filename)
         return action, probs
 
     # def evaluate_utility(self, buffer, env, _log, _run):

@@ -102,6 +102,7 @@ def main(args):
                 trainer.save_model(iter)
             with torch.no_grad():
                 embed = trainer.ObsEncoder(torch.tensor(obs, dtype=torch.float32).unsqueeze(0).to(trainer.device))  
+                print(f"PREV ACTION: {prev_action=} {prev_action.shape=}")
                 _, posterior_rssm_state = trainer.RSSM.rssm_observe(embed, prev_action, not done, prev_rssmstate)
                 model_state = trainer.RSSM.get_model_state(posterior_rssm_state)
                 
@@ -113,7 +114,7 @@ def main(args):
                     episode_actor_ent.append(action_ent)
                 else:
                     action, action_probs = maxtrainer()
-                    # action = action.detach()
+                    print(f"{action_probs}")
                     action_dist = torch.distributions.OneHotCategorical(probs=action_probs)
                     action_ent = torch.mean(action_dist.entropy()).item()
                     episode_actor_ent.append(action_ent)

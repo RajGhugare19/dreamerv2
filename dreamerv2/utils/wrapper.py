@@ -66,12 +66,12 @@ class encodingDreamer(gym.ObservationWrapper):
 
     def observation(self, observation):
         with torch.no_grad():
-            print(observation.shape, "--shape of observation before wrapper")
+            # print(observation.shape, "--shape of observation before wrapper")
             self.encoder = self.encoder.to(torch.device('cpu'))
             # observation = observation.to(self.device)
             observation = self.encoder(torch.tensor(observation, dtype=torch.float32).unsqueeze(0))
             self.encoder = self.encoder.to(torch.device('cuda'))
-            print(observation.shape, "--shape of observation after wrapper")
+            # print(observation.shape, "--shape of observation after wrapper")
             return observation
     
 class asterixPOMDP(gym.ObservationWrapper):

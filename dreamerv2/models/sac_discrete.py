@@ -49,7 +49,7 @@ def parse_args():
         help="the id of the environment")
     parser.add_argument("--total-timesteps", type=int, default=5000000,
         help="total timesteps of the experiments")
-    parser.add_argument("--buffer-size", type=int, default=int(1e6),
+    parser.add_argument("--buffer-size", type=int, default=int(1e6),  ##1e7 replay size
         help="the replay memory buffer size") # smaller than in original paper but evaluation is done only for 100k steps anyway
     parser.add_argument("--gamma", type=float, default=0.99,
         help="the discount factor gamma")
@@ -109,7 +109,7 @@ class ReplayBufferwithTransitionNormalizer(ReplayBuffer):
         device: Union[torch.device, str] = "cpu", 
         n_envs: int = 1, 
         optimize_memory_usage: bool = False, 
-        handle_timeout_termination: bool = True
+        handle_timeout_termination: bool = False
         ):
         super(ReplayBufferwithTransitionNormalizer, self).__init__(buffer_size, observation_space, action_space, 
         device, n_envs, optimize_memory_usage, handle_timeout_termination)
@@ -123,6 +123,19 @@ class ReplayBufferwithTransitionNormalizer(ReplayBuffer):
             obss = self.transition_normailizer.normalize_states(obss)
             next_obss = self.transition_normailizer.normalize_states(next_obss)
         return obss, actions, next_obss, dones, rewards
+
+    def add_batch(self, states, next_states, actions, rewards, dones, infos):
+        # print(f"ADD BATCH {states.shape=}")
+        # print(dsjfnkj)
+        for i in range(states.shape[0]):
+            self.add(
+                obs=states[np.newaxis, i, :].cpu().numpy(),
+                next_obs=next_states[np.newaxis, i, :].cpu().numpy(),
+                action=actions[np.newaxis, i, :].cpu().numpy(),
+                reward=rewards[i].cpu().numpy(),
+                done=np.array([False]),
+                infos=[{}]
+            )
 
 def layer_init(layer, bias_const=0.0):
     nn.init.kaiming_normal_(layer.weight)
@@ -158,6 +171,7 @@ class ParallelLinear(nn.Module):
         self.biases = nn.Parameter(biases, requires_grad=True)
 
     def forward(self, inp):
+        # print(f"BADDBMM {self.biases.shape=} {inp.shape=} {self.weights.shape=}")
         op = torch.baddbmm(self.biases, inp, self.weights)
         return op
 ## ----- end added!
@@ -167,7 +181,7 @@ class ParallelLinear(nn.Module):
 # See the SAC+AE paper https://arxiv.org/abs/1910.01741 for more info
 # TL;DR The self.actor's gradients mess up the representation when using a joint encoder
 class SoftQNetwork(nn.Module):
-    def __init__(self, d_state, d_action, n_hidden): #envs):
+    def __init__(self, d_state, d_action, n_hidden, ensemble_size): #envs):
         super(SoftQNetwork, self).__init__()
         # obs_shape = envs.single_observation_space.shape
         # self.conv = nn.Sequential(
@@ -180,11 +194,11 @@ class SoftQNetwork(nn.Module):
         # )
         # with torch.inference_mode():
         #     output_dim = self.conv(torch.zeros(1, *obs_shape)).shape[1]
-        self.layers = nn.Sequential(ParallelLinear(d_state, n_hidden, ensemble_size=2),
+        self.layers = nn.Sequential(ParallelLinear(d_state, n_hidden, ensemble_size=ensemble_size),
                                     nn.LeakyReLU(),
-                                    ParallelLinear(n_hidden, n_hidden, ensemble_size=2),
+                                    ParallelLinear(n_hidden, n_hidden, ensemble_size=ensemble_size),
                                     nn.LeakyReLU(),
-                                    ParallelLinear(n_hidden, d_action, ensemble_size=2))
+                                    ParallelLinear(n_hidden, d_action, ensemble_size=ensemble_size))
 
         # self.fc1 = layer_init(nn.Linear(output_dim, 512))
         # self.fc_q = layer_init(nn.Linear(512, envs.single_action_space.n))
@@ -237,8 +251,12 @@ class Actor(nn.Module):
         return logits
 
     def get_action(self, x):
+        # print(f"we are in actor {x.shape=}")
+        # normalisation TODO ?
         logits = self(x) #self(x / 255.0)
-        policy_dist = Categorical(logits=logits)
+        # print(f'logits are created {logits.shape=}')
+        # policy_dist = Categorical(logits=logits)
+        policy_dist = torch.distributions.OneHotCategorical(logits=logits)
         action = policy_dist.sample()
         # Action probabilities for calculating the adapted soft-Q loss
         action_probs = policy_dist.probs
@@ -290,10 +308,10 @@ class SAC(nn.Module):
         # assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
         self.actor = Actor(d_state, d_action, n_hidden).to(self.device)
-        self.qf1 = SoftQNetwork(d_state, d_action, n_hidden).to(self.device)
-        self.qf2 = SoftQNetwork(d_state, d_action, n_hidden).to(self.device)
-        self.qf1_target = SoftQNetwork(d_state, d_action, n_hidden).to(self.device)
-        self.qf2_target = SoftQNetwork(d_state, d_action, n_hidden).to(self.device)
+        self.qf1 = SoftQNetwork(d_state, d_action, n_hidden, self.args.batch_size).to(self.device)
+        self.qf2 = SoftQNetwork(d_state, d_action, n_hidden, self.args.batch_size).to(self.device)
+        self.qf1_target = SoftQNetwork(d_state, d_action, n_hidden, self.args.batch_size).to(self.device)
+        self.qf2_target = SoftQNetwork(d_state, d_action, n_hidden, self.args.batch_size).to(self.device)
         self.qf1_target.load_state_dict(self.qf1.state_dict())
         self.qf2_target.load_state_dict(self.qf2.state_dict())
         # TRY NOT TO MODIFY: eps=1e-4 increases numerical stability
@@ -309,46 +327,67 @@ class SAC(nn.Module):
         else:
             self.alpha = self.args.alpha
 
-        self.replay = ReplayBufferwithTransitionNormalizer(
-            self.args.buffer_size,
-            env.observation_space, # d_state,
-            env.action_space,  #d_action,
-            self.device,
-            handle_timeout_termination=True,
-        )
+        self.replay_params = {
+            'replay_size' : replay_size,
+            'obs_space' : env.observation_space,
+            'action_space' : env.action_space,
+            'handle_timeout_termination' : False
+        }
+
+        self.replay = self.create_new_replay()
         self.start_time = time.time()
 
         # MAX SAC params
         self.normalizer = None
         self.global_step = 0
+        self.n_updates = n_updates
 
     def setup_normalizer(self, normalizer):
         self.normalizer = normalizer
         self.replay.setup_transition_normailizer(normalizer)
 
-    def __call__(self, states, eval=False):
-        if self.normalizer is not None:
-            states = self.normalizer.normalize_states(states)
-        pass
+    # def __call__(self, states, eval=False):
+    #     if self.normalizer is not None:
+    #         states = self.normalizer.normalize_states(states)
+    #     pass
+    #     # TODO !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
+    def create_new_replay(self):
+        return ReplayBufferwithTransitionNormalizer(
+            buffer_size=self.replay_params['replay_size'],
+            observation_space=self.replay_params['obs_space'],
+            action_space=self.replay_params['action_space'],
+            device=self.device,
+            handle_timeout_termination=self.replay_params['handle_timeout_termination']
+        )
+
+    def reset_replay(self):
+        del self.replay
+        self.replay = self.create_new_replay()
 
     def episode(self, env, warm_up=False, train=True, verbosity=0, _log=None):
         # TRY NOT TO MODIFY: start the game
         obs = env.reset()
+        dones = False
+        episode_length = 0
         # for global_step in range(self.args.total_timesteps):
-        while not any(dones):
+        while not dones:
             # ALGO LOGIC: put action logic here
             if self.global_step < self.args.learning_starts:
                 # actions = np.array([envs.single_action_space.sample() for _ in range(envs.num_envs)])
                 # actions = np.array([env.action_space.sample() for _ in range(env.ensemble_size)])
                 actions = env.action_space.sample()
                 actions = torch.from_numpy(actions)
+                # print(f'sample action {type(actions)} {actions.shape}')
             else:
-                actions, _, _ = self.actor.get_action(torch.Tensor(obs).to(self.device))
-                actions = actions.detach().cpu().numpy()
+                print(f'agent tries to act in imagination {type(actions)} {actions.shape}')
+                with torch.enable_grad():
+                    actions, _, _ = self.actor.get_action(torch.Tensor(obs).to(self.device))
+                # actions = actions.detach().cpu().numpy()
 
             # TRY NOT TO MODIFY: execute the game and log data.
             next_obs, rewards, dones, infos = env.step(actions) #envs.step(actions)
+            # print(f"{obs.shape=}, {next_obs.shape=}, {actions.shape=}, {rewards=}, {dones=}, {infos=}")
 
             # TRY NOT TO MODIFY: record rewards for plotting purposes
             for info in infos:
@@ -359,15 +398,23 @@ class SAC(nn.Module):
                     break
 
             # TRY NOT TO MODIFY: save data to reply buffer; handle `terminal_observation`
-            real_next_obs = next_obs.copy()
-            for idx, d in enumerate(dones):
-                if d:
-                    real_next_obs[idx] = infos[idx]["terminal_observation"]
-            self.replay.add(obs, real_next_obs, actions, rewards, dones, infos)
+            # real_next_obs = next_obs.copy()
+            real_next_obs = next_obs.clone().detach()
+            # for idx, d in enumerate(dones):
+            #     if d:
+            #         real_next_obs[idx] = infos[idx]["terminal_observation"]
+            self.replay.add(obs.cpu().numpy(), real_next_obs.cpu().numpy(), actions.cpu().numpy(), rewards.cpu().numpy(), dones, infos)
 
             # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
             obs = next_obs
             self.global_step += 1
+            episode_length += 1
+
+        if train:
+            if not warm_up:
+                for _ in range(self.n_updates * episode_length):
+                    self.update()
+        
 
     def update(self):
         # ALGO LOGIC: training.
@@ -375,45 +422,57 @@ class SAC(nn.Module):
         # CRITIC training
         with torch.no_grad():
             _, next_state_log_pi, next_state_action_probs = self.actor.get_action(data.next_observations)
-            qf1_next_target = self.qf1_target(data.next_observations)
-            qf2_next_target = self.qf2_target(data.next_observations)
+            qf1_next_target = self.qf1_target(data.next_observations)                           #  [64, 1, 200] -> [64, 1, 3]
+            qf2_next_target = self.qf2_target(data.next_observations)                           #  [64, 1, 200] -> [64, 1, 3]
             # we can use the action probabilities instead of MC sampling to estimate the expectation
-            min_qf_next_target = next_state_action_probs * (
+            min_qf_next_target = next_state_action_probs * (                                    #  [64, 1, 3]
                 torch.min(qf1_next_target, qf2_next_target) - self.alpha * next_state_log_pi
             )
-            # adapt Q-target for discrete Q-function
-            min_qf_next_target = min_qf_next_target.sum(dim=1)
-            next_q_value = data.rewards.flatten() + (1 - data.dones.flatten()) * self.args.gamma * (min_qf_next_target)
 
-        # use Q-values only for the taken actions
-        qf1_values = self.qf1(data.observations)
-        qf2_values = self.qf2(data.observations)
-        qf1_a_values = qf1_values.gather(1, data.actions.long()).view(-1)
-        qf2_a_values = qf2_values.gather(1, data.actions.long()).view(-1)
-        qf1_loss = F.mse_loss(qf1_a_values, next_q_value)
-        qf2_loss = F.mse_loss(qf2_a_values, next_q_value)
-        qf_loss = qf1_loss + qf2_loss
+            # adapt Q-target for discrete Q-function
+            min_qf_next_target = min_qf_next_target.squeeze(1)
+            min_qf_next_target = min_qf_next_target.sum(dim=1)                                 # [64, 1, 3] -> [64, 3]
+            # print(f"{min_qf_next_target.shape=}")
+            next_q_value = data.rewards.flatten() + (1 - data.dones.flatten()) * self.args.gamma * (min_qf_next_target)
+                            #[64, 1]                   [64, 1]                                         [64, 3 ]
+
+        with torch.enable_grad():
+            # use Q-values only for the taken actions
+            qf1_values = self.qf1(data.observations)
+            qf2_values = self.qf2(data.observations)
+            qf1_a_values = qf1_values.squeeze().gather(1, data.actions.argmax(1).unsqueeze(1).long()).view(-1)
+            qf2_a_values = qf2_values.squeeze().gather(1, data.actions.argmax(1).unsqueeze(1).long()).view(-1)
+            # print(f"{qf2_values.shape=} {data.actions.shape=}")
+            # print(f"{qf2_a_values.shape=} {next_q_value.shape=}")
+            qf1_loss = F.mse_loss(qf1_a_values, next_q_value)
+            qf2_loss = F.mse_loss(qf2_a_values, next_q_value)
+            qf_loss = qf1_loss + qf2_loss
 
         self.q_optimizer.zero_grad()
         qf_loss.backward()
         self.q_optimizer.step()
 
         # ACTOR training
-        _, log_pi, action_probs = self.actor.get_action(data.observations)
+        with torch.enable_grad():
+            _, log_pi, action_probs = self.actor.get_action(data.observations)
+    
         with torch.no_grad():
             qf1_values = self.qf1(data.observations)
             qf2_values = self.qf2(data.observations)
             min_qf_values = torch.min(qf1_values, qf2_values)
-        # no need for reparameterization, the expectation can be calculated for discrete actions
-        actor_loss = (action_probs * ((self.alpha * log_pi) - min_qf_values)).mean()
+        
+        with torch.enable_grad():
+            # no need for reparameterization, the expectation can be calculated for discrete actions
+            actor_loss = (action_probs * ((self.alpha * log_pi) - min_qf_values)).mean()
 
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
         self.actor_optimizer.step()
 
         if self.args.autotune:
-            # re-use action probabilities for temperature loss
-            alpha_loss = (action_probs.detach() * (-self.log_alpha * (log_pi + self.target_entropy).detach())).mean()
+            with torch.enable_grad():
+                # re-use action probabilities for temperature loss
+                alpha_loss = (action_probs.detach() * (-self.log_alpha * (log_pi + self.target_entropy).detach())).mean()
 
             self.a_optimizer.zero_grad()
             alpha_loss.backward()
@@ -427,126 +486,127 @@ class SAC(nn.Module):
         for param, target_param in zip(self.qf2.parameters(), self.qf2_target.parameters()):
             target_param.data.copy_(self.args.tau * param.data + (1 - self.args.tau) * target_param.data)
 
-        # if global_step % 100 == 0:
-        self.writer.add_scalar("losses/qf1_values", qf1_a_values.mean().item(), self.global_step)
-        self.writer.add_scalar("losses/qf2_values", qf2_a_values.mean().item(), self.global_step)
-        self.writer.add_scalar("losses/qf1_loss", qf1_loss.item(), self.global_step)
-        self.writer.add_scalar("losses/qf2_loss", qf2_loss.item(), self.global_step)
-        self.writer.add_scalar("losses/qf_loss", qf_loss.item() / 2.0, self.global_step)
-        self.writer.add_scalar("losses/actor_loss", actor_loss.item(), self.global_step)
-        self.writer.add_scalar("losses/alpha", self.alpha, self.global_step)
-        print("SPS:", int(self.global_step / (time.time() - self.start_time)))
-        self.writer.add_scalar("charts/SPS", int(self.global_step / (time.time() - self.start_time)), self.global_step)
-        if self.args.autotune:
-            self.writer.add_scalar("losses/alpha_loss", alpha_loss.item(), self.global_step)
+        if self.global_step % 100 == 0:
+            self.writer.add_scalar("losses/qf1_values", qf1_a_values.mean().item(), self.global_step)
+            self.writer.add_scalar("losses/qf2_values", qf2_a_values.mean().item(), self.global_step)
+            self.writer.add_scalar("losses/qf1_loss", qf1_loss.item(), self.global_step)
+            self.writer.add_scalar("losses/qf2_loss", qf2_loss.item(), self.global_step)
+            self.writer.add_scalar("losses/qf_loss", qf_loss.item() / 2.0, self.global_step)
+            self.writer.add_scalar("losses/actor_loss", actor_loss.item(), self.global_step)
+            self.writer.add_scalar("losses/alpha", self.alpha, self.global_step)
+            print("SPS:", int(self.global_step / (time.time() - self.start_time)))
+            self.writer.add_scalar("charts/SPS", int(self.global_step / (time.time() - self.start_time)), self.global_step)
+            if self.args.autotune:
+                self.writer.add_scalar("losses/alpha_loss", alpha_loss.item(), self.global_step)
+        self.global_step += 1
 
-    def cleanrlepisode(self, env, warm_up=False, train=True, verbosity=0, _log=None):
+    # def cleanrlepisode(self, env, warm_up=False, train=True, verbosity=0, _log=None):
 
-        # TRY NOT TO MODIFY: start the game
-        obs = env.reset()
-        for global_step in range(self.args.total_timesteps):
-            # ALGO LOGIC: put action logic here
-            if global_step < self.args.learning_starts:
-                # actions = np.array([envs.single_action_space.sample() for _ in range(envs.num_envs)])
-                # actions = np.array([env.action_space.sample() for _ in range(env.ensemble_size)])
-                actions = env.action_space.sample()
-                actions = torch.from_numpy(actions)
-            else:
-                actions, _, _ = self.actor.get_action(torch.Tensor(obs).to(self.device))
-                actions = actions.detach().cpu().numpy()
+    #     # TRY NOT TO MODIFY: start the game
+    #     obs = env.reset()
+    #     for global_step in range(self.args.total_timesteps):
+    #         # ALGO LOGIC: put action logic here
+    #         if global_step < self.args.learning_starts:
+    #             # actions = np.array([envs.single_action_space.sample() for _ in range(envs.num_envs)])
+    #             # actions = np.array([env.action_space.sample() for _ in range(env.ensemble_size)])
+    #             actions = env.action_space.sample()
+    #             actions = torch.from_numpy(actions)
+    #         else:
+    #             actions, _, _ = self.actor.get_action(torch.Tensor(obs).to(self.device))
+    #             actions = actions.detach().cpu().numpy()
 
-            # TRY NOT TO MODIFY: execute the game and log data.
-            next_obs, rewards, dones, infos = env.step(actions) #envs.step(actions)
+    #         # TRY NOT TO MODIFY: execute the game and log data.
+    #         next_obs, rewards, dones, infos = env.step(actions) #envs.step(actions)
 
-            # TRY NOT TO MODIFY: record rewards for plotting purposes
-            for info in infos:
-                if "episode" in info.keys():
-                    print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
-                    self.writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
-                    self.writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
-                    break
+    #         # TRY NOT TO MODIFY: record rewards for plotting purposes
+    #         for info in infos:
+    #             if "episode" in info.keys():
+    #                 print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
+    #                 self.writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
+    #                 self.writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
+    #                 break
 
-            # TRY NOT TO MODIFY: save data to reply buffer; handle `terminal_observation`
-            real_next_obs = next_obs.copy()
-            for idx, d in enumerate(dones):
-                if d:
-                    real_next_obs[idx] = infos[idx]["terminal_observation"]
-            self.replay.add(obs, real_next_obs, actions, rewards, dones, infos)
+    #         # TRY NOT TO MODIFY: save data to reply buffer; handle `terminal_observation`
+    #         real_next_obs = next_obs.copy()
+    #         for idx, d in enumerate(dones):
+    #             if d:
+    #                 real_next_obs[idx] = infos[idx]["terminal_observation"]
+    #         self.replay.add(obs, real_next_obs, actions, rewards, dones, infos)
 
-            # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
-            obs = next_obs
+    #         # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
+    #         obs = next_obs
 
-            # ALGO LOGIC: training.
-            if global_step > self.args.learning_starts:
-                if global_step % self.args.update_frequency == 0:
-                    data = self.replay.sample(self.args.batch_size)
-                    # CRITIC training
-                    with torch.no_grad():
-                        _, next_state_log_pi, next_state_action_probs = self.actor.get_action(data.next_observations)
-                        qf1_next_target = self.qf1_target(data.next_observations)
-                        qf2_next_target = self.qf2_target(data.next_observations)
-                        # we can use the action probabilities instead of MC sampling to estimate the expectation
-                        min_qf_next_target = next_state_action_probs * (
-                            torch.min(qf1_next_target, qf2_next_target) - self.alpha * next_state_log_pi
-                        )
-                        # adapt Q-target for discrete Q-function
-                        min_qf_next_target = min_qf_next_target.sum(dim=1)
-                        next_q_value = data.rewards.flatten() + (1 - data.dones.flatten()) * self.args.gamma * (min_qf_next_target)
+    #         # ALGO LOGIC: training.
+    #         if global_step > self.args.learning_starts:
+    #             if global_step % self.args.update_frequency == 0:
+    #                 data = self.replay.sample(self.args.batch_size)
+    #                 # CRITIC training
+    #                 with torch.no_grad():
+    #                     _, next_state_log_pi, next_state_action_probs = self.actor.get_action(data.next_observations)
+    #                     qf1_next_target = self.qf1_target(data.next_observations)
+    #                     qf2_next_target = self.qf2_target(data.next_observations)
+    #                     # we can use the action probabilities instead of MC sampling to estimate the expectation
+    #                     min_qf_next_target = next_state_action_probs * (
+    #                         torch.min(qf1_next_target, qf2_next_target) - self.alpha * next_state_log_pi
+    #                     )
+    #                     # adapt Q-target for discrete Q-function
+    #                     min_qf_next_target = min_qf_next_target.sum(dim=1)
+    #                     next_q_value = data.rewards.flatten() + (1 - data.dones.flatten()) * self.args.gamma * (min_qf_next_target)
 
-                    # use Q-values only for the taken actions
-                    qf1_values = self.qf1(data.observations)
-                    qf2_values = self.qf2(data.observations)
-                    qf1_a_values = qf1_values.gather(1, data.actions.long()).view(-1)
-                    qf2_a_values = qf2_values.gather(1, data.actions.long()).view(-1)
-                    qf1_loss = F.mse_loss(qf1_a_values, next_q_value)
-                    qf2_loss = F.mse_loss(qf2_a_values, next_q_value)
-                    qf_loss = qf1_loss + qf2_loss
+    #                 # use Q-values only for the taken actions
+    #                 qf1_values = self.qf1(data.observations)
+    #                 qf2_values = self.qf2(data.observations)
+    #                 qf1_a_values = qf1_values.gather(1, data.actions.long()).view(-1)
+    #                 qf2_a_values = qf2_values.gather(1, data.actions.long()).view(-1)
+    #                 qf1_loss = F.mse_loss(qf1_a_values, next_q_value)
+    #                 qf2_loss = F.mse_loss(qf2_a_values, next_q_value)
+    #                 qf_loss = qf1_loss + qf2_loss
 
-                    self.q_optimizer.zero_grad()
-                    qf_loss.backward()
-                    self.q_optimizer.step()
+    #                 self.q_optimizer.zero_grad()
+    #                 qf_loss.backward()
+    #                 self.q_optimizer.step()
 
-                    # ACTOR training
-                    _, log_pi, action_probs = self.actor.get_action(data.observations)
-                    with torch.no_grad():
-                        qf1_values = self.qf1(data.observations)
-                        qf2_values = self.qf2(data.observations)
-                        min_qf_values = torch.min(qf1_values, qf2_values)
-                    # no need for reparameterization, the expectation can be calculated for discrete actions
-                    actor_loss = (action_probs * ((self.alpha * log_pi) - min_qf_values)).mean()
+    #                 # ACTOR training
+    #                 _, log_pi, action_probs = self.actor.get_action(data.observations)
+    #                 with torch.no_grad():
+    #                     qf1_values = self.qf1(data.observations)
+    #                     qf2_values = self.qf2(data.observations)
+    #                     min_qf_values = torch.min(qf1_values, qf2_values)
+    #                 # no need for reparameterization, the expectation can be calculated for discrete actions
+    #                 actor_loss = (action_probs * ((self.alpha * log_pi) - min_qf_values)).mean()
 
-                    self.actor_optimizer.zero_grad()
-                    actor_loss.backward()
-                    self.actor_optimizer.step()
+    #                 self.actor_optimizer.zero_grad()
+    #                 actor_loss.backward()
+    #                 self.actor_optimizer.step()
 
-                    if self.args.autotune:
-                        # re-use action probabilities for temperature loss
-                        alpha_loss = (action_probs.detach() * (-self.log_alpha * (log_pi + self.target_entropy).detach())).mean()
+    #                 if self.args.autotune:
+    #                     # re-use action probabilities for temperature loss
+    #                     alpha_loss = (action_probs.detach() * (-self.log_alpha * (log_pi + self.target_entropy).detach())).mean()
 
-                        self.a_optimizer.zero_grad()
-                        alpha_loss.backward()
-                        self.a_optimizer.step()
-                        self.alpha = self.log_alpha.exp().item()
+    #                     self.a_optimizer.zero_grad()
+    #                     alpha_loss.backward()
+    #                     self.a_optimizer.step()
+    #                     self.alpha = self.log_alpha.exp().item()
 
-                # update the target networks
-                if global_step % self.args.target_network_frequency == 0:
-                    for param, target_param in zip(self.qf1.parameters(), self.qf1_target.parameters()):
-                        target_param.data.copy_(self.args.tau * param.data + (1 - self.args.tau) * target_param.data)
-                    for param, target_param in zip(self.qf2.parameters(), self.qf2_target.parameters()):
-                        target_param.data.copy_(self.args.tau * param.data + (1 - self.args.tau) * target_param.data)
+    #             # update the target networks
+    #             if global_step % self.args.target_network_frequency == 0:
+    #                 for param, target_param in zip(self.qf1.parameters(), self.qf1_target.parameters()):
+    #                     target_param.data.copy_(self.args.tau * param.data + (1 - self.args.tau) * target_param.data)
+    #                 for param, target_param in zip(self.qf2.parameters(), self.qf2_target.parameters()):
+    #                     target_param.data.copy_(self.args.tau * param.data + (1 - self.args.tau) * target_param.data)
 
-                if global_step % 100 == 0:
-                    self.writer.add_scalar("losses/qf1_values", qf1_a_values.mean().item(), global_step)
-                    self.writer.add_scalar("losses/qf2_values", qf2_a_values.mean().item(), global_step)
-                    self.writer.add_scalar("losses/qf1_loss", qf1_loss.item(), global_step)
-                    self.writer.add_scalar("losses/qf2_loss", qf2_loss.item(), global_step)
-                    self.writer.add_scalar("losses/qf_loss", qf_loss.item() / 2.0, global_step)
-                    self.writer.add_scalar("losses/actor_loss", actor_loss.item(), global_step)
-                    self.writer.add_scalar("losses/alpha", self.alpha, global_step)
-                    print("SPS:", int(global_step / (time.time() - self.start_time)))
-                    self.writer.add_scalar("charts/SPS", int(global_step / (time.time() - self.start_time)), global_step)
-                    if self.args.autotune:
-                        self.writer.add_scalar("losses/alpha_loss", alpha_loss.item(), global_step)
+    #             if global_step % 100 == 0:
+    #                 self.writer.add_scalar("losses/qf1_values", qf1_a_values.mean().item(), global_step)
+    #                 self.writer.add_scalar("losses/qf2_values", qf2_a_values.mean().item(), global_step)
+    #                 self.writer.add_scalar("losses/qf1_loss", qf1_loss.item(), global_step)
+    #                 self.writer.add_scalar("losses/qf2_loss", qf2_loss.item(), global_step)
+    #                 self.writer.add_scalar("losses/qf_loss", qf_loss.item() / 2.0, global_step)
+    #                 self.writer.add_scalar("losses/actor_loss", actor_loss.item(), global_step)
+    #                 self.writer.add_scalar("losses/alpha", self.alpha, global_step)
+    #                 print("SPS:", int(global_step / (time.time() - self.start_time)))
+    #                 self.writer.add_scalar("charts/SPS", int(global_step / (time.time() - self.start_time)), global_step)
+    #                 if self.args.autotune:
+    #                     self.writer.add_scalar("losses/alpha_loss", alpha_loss.item(), global_step)
 
-        # envs.close()
-        # self.writer.close()
+    #     # envs.close()
+    #     # self.writer.close()
