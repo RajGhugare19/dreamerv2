@@ -61,7 +61,7 @@ class MaxActionModel(nn.Module):
         os.makedirs(self.dump_dir, exist_ok=True)
 
         # model arch params
-        self.ensemble_size = 32                              # number of models in the bootstrap ensemble
+        self.ensemble_size = 2                               # number of models in the bootstrap ensemble
         self.n_hidden = 512                                  # number of hidden units in each hidden layer (hidden layer size)
         self.n_layers = 4                                    # number of hidden layers in the model (at least 2)
         self.non_linearity = 'swish'                         # activation function: can be 'leaky_relu' or 'swish'
@@ -78,7 +78,7 @@ class MaxActionModel(nn.Module):
 
         # policy params
         # common to both exploration and exploitation
-        self.policy_actors = 128                             # number of parallel actors in imagination MDP
+        self.policy_actors = 1                               # number of parallel actors in imagination MDP
         self.policy_warm_up_episodes = 3                     # number of episodes with random actions before SAC on-policy data is collected (as a part of init)
 
         self.policy_replay_size = int(1e7)                   # SAC replay size
@@ -175,132 +175,139 @@ class MaxActionModel(nn.Module):
     """
     Model Training
     """
-    def train_epoch(self, model, buffer, optimizer):
+    def train_epoch(self):
         losses = []
-        for tr_states, tr_actions, tr_state_deltas in buffer.train_batches(batch_size=self.batch_size):
-            optimizer.zero_grad()
-            loss = model.loss(tr_states, tr_actions, tr_state_deltas, training_noise_stdev=self.training_noise_stdev)
+        
+        for tr_states, tr_actions, tr_state_deltas in \
+            self.buffer.train_batches(batch_size=self.batch_size):
+
+            self.optimizer.zero_grad()
+            with torch.enable_grad():
+                loss = self.model.loss(tr_states, tr_actions, tr_state_deltas, 
+                    training_noise_stdev=self.training_noise_stdev)
             losses.append(loss.item())
             loss.backward()
-            torch.nn.utils.clip_grad_value_(model.parameters(), self.grad_clip)
-            optimizer.step()
-
+            torch.nn.utils.clip_grad_value_(self.model.parameters(), self.grad_clip)
+            self.optimizer.step()
         return np.mean(losses)
 
-    def fit_model(self, buffer, n_epochs, step_num, mode, _log, _run):
+    def fit_model(self, buffer, n_epochs, step_num, mode, _log=None, _run=None):
             
-        model = self._build_model()
-        model.setup_normalizer(buffer.normalizer)
-        optimizer = torch.optim.Adam(model.parameters(), 
+        self.model = self._build_model()
+        self.model.setup_normalizer(self.normalizer)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), 
             lr=self.learning_rate, weight_decay=self.weight_decay)
 
         # if self.verbosity:
         #     _log.info(f"step: {step_num}\t training")
-
+        
         for epoch_i in range(1, n_epochs + 1):
-            tr_loss = self.train_epoch(model=model, buffer=buffer, optimizer=optimizer)
+            tr_loss = self.train_epoch()
             # if self.verbosity >= 2:
             #     _log.info(f'epoch: {epoch_i:3d} training_loss: {tr_loss:.2f}')
 
         # _log.info(f"step: {step_num}\t training done for {n_epochs} epochs, final loss: {np.round(tr_loss, 3)}")
         # if mode == 'explore':
         #     _run.log_scalar("explore_loss", tr_loss, step_num)
-        return model
 
     """
     Planning
     """
-    def get_policy(self, buffer, model, measure, _log):
+    def get_policy(self, _log=None):
+
+        # , buffer, model, measure
 
         # if self.verbosity:
         #     _log.info("... getting fresh agent")
 
-        agent = SAC(d_state=self.d_state, d_action=self.d_action, replay_size=self.policy_replay_size, 
+        self.agent = SAC(d_state=self.d_state, d_action=self.d_action, replay_size=self.policy_replay_size, 
             batch_size=self.policy_batch_size, n_updates=self.policy_active_updates, n_hidden=self.policy_n_hidden, 
-            gamma=self.policy_gamma, alpha=self.policy_explore_alpha, lr=self.policy_lr, tau=self.policy_tau)
+            gamma=self.policy_gamma, alpha=self.policy_explore_alpha, lr=self.policy_lr, tau=self.policy_tau, env=self.mdp)
 
-        agent = agent.to(device)
-        agent.setup_normalizer(model.normalizer)
+        self.agent = self.agent.to(device)
+        self.agent.setup_normalizer(self.normalizer)
 
         if not self.buffer_reuse:
-            return agent
+            return self.agent
 
         # if self.verbosity:
         #     _log.info("... transferring exploration buffer")
 
-        size = len(buffer)
+        size = len(self.buffer)
         for i in range(0, size, 1024):
             j = min(i + 1024, size)
-            s, a = buffer.states[i:j], buffer.actions[i:j]
-            ns = buffer.states[i:j] + buffer.state_deltas[i:j]
+            s, a = self.buffer.states[i:j], self.buffer.actions[i:j]
+            ns = self.buffer.states[i:j] + self.buffer.state_deltas[i:j]
             s, a, ns = s.to(device), a.to(device), ns.to(device)
             with torch.no_grad():
-                mu, var = model.forward_all(s, a)
-            r = measure(s, a, ns, mu, var, model)
+                # print(self.model)
+                mu, var = self.model.forward_all(s, a)
+            r = self.utility(s, a, ns, mu, var, self.model)
+            print(s.shape, ns.shape, a.shape, r.shape)
             # agent.replay.add(s, a, r, ns)
-            agent.replay.add(s, ns, a, r, np.zeros(0), [{}])
+            self.agent.replay.add(s, ns, a, r, np.zeros(0), [{}])
 
-        return agent
-
-    def get_action(self, mdp, agent):
-        current_state = mdp.reset()
+    def get_action(self):
+        current_state = self.mdp.reset()
         # actions = agent(current_state, eval=True)
         # action = actions[0].detach().data.cpu().numpy()
         # probs = action[1].detach().data.cpu().numpy()
         # policy_value = torch.mean(agent.get_state_value(current_state)).item()
         # return action, probs, mdp, agent, policy_value
-        actions, log_pi, action_probs = agent.actor.get_action(current_state)
-        qf1_values = agent.qf1(current_state)
-        qf2_values = agent.qf2(current_state)
+        actions, log_pi, action_probs = self.agent.actor.get_action(current_state)
+        qf1_values = self.agent.qf1(current_state)
+        qf2_values = self.agent.qf2(current_state)
         policy_value = torch.min(qf1_values, qf2_values)
         # TODO here we can have problems with dimentions ....
-        return actions, action_probs, mdp, agent, policy_value
+        return actions, action_probs, self.mdp, self.agent, policy_value
 
-    def act(self, state, agent, mdp, buffer, model, measure, mode, _run, _log):
-
+    def act(self, mode='explore', _run=None, _log=None):
         policy_horizon = self.policy_explore_horizon
         policy_episodes = self.policy_explore_episodes
 
-        fresh_agent = True if agent is None else False
+        fresh_agent = True if self.agent is None else False
 
-        if mdp is None:
-            mdp = Imagination(horizon=policy_horizon, n_actors=self.policy_actors, model=model, measure=measure)
+        if self.mdp is None:
+            self.mdp = Imagination(horizon=policy_horizon, 
+                n_actors=self.policy_actors, model=self.model, 
+                measure=self.utility, ensemble_size=self.ensemble_size, 
+                d_action=self.d_action, d_state=self.d_state)
 
         if fresh_agent:
-            agent = self.get_policy(buffer=buffer, model=model, measure=measure, mode=mode)
+            self.get_policy()  # get new agent
 
         # update state to current env state
-        mdp.update_init_state(state)
+        self.mdp.update_init_state(self.state)
 
         if not fresh_agent:
             # agent is not stale, use it to return action
-            return self.get_action(mdp, agent)
+            return self.get_action()
 
         # reactive updates
         for update_idx in range(self.policy_reactive_updates):  ### ????
-            agent.update()
+            self.agent.update()
 
         # active updates -- perform active exploration
         # to be fair to reactive methods, clear real env data in SAC buffer, to prevent further gradient updates from it.
         # for active exploration, only effect of on-policy training remains
-        agent.reset_replay()
+        self.agent.reset_replay()
 
         ep_returns = []
-        best_return, best_params = -np.inf, deepcopy(agent.state_dict())
+        best_return, best_params = -np.inf, deepcopy(self.agent.state_dict())
         for ep_i in range(policy_episodes):
             warm_up = True if ((ep_i < self.policy_warm_up_episodes) and fresh_agent) else False
-            ep_return = agent.episode(env=mdp, warm_up=warm_up, verbosity=self.verbosity, _log=_log)
+            ep_return = self.agent.episode(env=self.mdp, warm_up=warm_up, verbosity=self.verbosity, _log=_log)
             ep_returns.append(ep_return)
 
             if self.use_best_policy and ep_return > best_return:
-                best_return, best_params = ep_return, deepcopy(agent.state_dict())
+                best_return, best_params = ep_return, deepcopy(self.agent.state_dict())
 
             # if self.verbosity:
             #     step_return = ep_return / policy_horizon
             #     _log.info(f"\tep: {ep_i}\taverage step return: {np.round(step_return, 3)}")
 
         if self.use_best_policy:
-            agent.load_state_dict(best_params)
+            self.agent.load_state_dict(best_params)
 
             # if mode == 'explore' and len(ep_returns) >= 3:
             #     first_return = ep_returns[0]
@@ -315,21 +322,21 @@ class MaxActionModel(nn.Module):
             #     _run.log_scalar("policy_improvement_second_last_delta", (last_return - ep_returns[1]) / policy_horizon)
             #     _run.log_scalar("policy_improvement_median_last_delta", (last_return - np.median(ep_returns)) / policy_horizon)
 
-        return self.get_action(mdp, agent)
+        return self.get_action()
 
 
     """
     Evaluation and Check-pointing
     """
-    def transition_novelty(self, state, action, next_state, model):
-        state = torch.from_numpy(state).float().unsqueeze(0).to(model.device)
-        action = torch.from_numpy(action).float().unsqueeze(0).to(model.device)
-        next_state = torch.from_numpy(next_state).float().unsqueeze(0).to(model.device)
+    def transition_novelty(self, state, action, next_state):
+        state = torch.from_numpy(state).float().unsqueeze(0).to(self.model.device)
+        action = torch.from_numpy(action).float().unsqueeze(0).to(self.model.device)
+        next_state = torch.from_numpy(next_state).float().unsqueeze(0).to(self.model.device)
 
         with torch.no_grad():
-            mu, var = model.forward_all(state, action)
+            mu, var = self.model.forward_all(state, action)
         measure = JensenRenyiDivergenceUtilityMeasure(decay=self.renyi_decay)
-        v = measure(state, action, next_state, mu, var, model)
+        v = measure(state, action, next_state, mu, var, self.model)
         return v.item()
 
     def checkpoint(self, buffer, step_num, _run):
@@ -368,12 +375,10 @@ class MaxActionModel(nn.Module):
         self.state = self.env.reset()
         self.step_num = 1
 
-    def do_max_exploration(self,_log, _run) -> None:
+    def do_max_exploration(self, _log=None, _run=None) -> None:
         self.step_num += 1
         if self.step_num > self.n_warm_up_steps:
-            action, probs, mdp, agent, policy_value = self.act(
-                state=self.state, agent=agent, mdp=mdp, buffer=self.buffer, 
-                model=model, measure=self.utility, mode='explore')
+            action, probs, mdp, agent, policy_value = self.act(mode='explore')
 
             # _run.log_scalar("action_norm", np.sum(np.square(action)), step_num)
             # _run.log_scalar("exploration_policy_value", policy_value, step_num)
@@ -382,21 +387,23 @@ class MaxActionModel(nn.Module):
                 action = action + np.random.normal(scale=self.action_noise_stdev, size=action.shape)
         else:
             action = self.env.action_space.sample()
+            probs = np.ones_like(action) / len(action)
+            probs = torch.from_numpy(probs)
 
         next_state, reward, done, info = self.env.step(action)
-        self.buffer.add(self.state, action, next_state)
+        self.buffer.add(self.state.numpy(), action, next_state.numpy())
 
         if self.step_num > self.n_warm_up_steps:
             _run.log_scalar("experience_novelty", 
-            self.transition_novelty(self.state, action, next_state, model=model), self.step_num)
+            self.transition_novelty(self.state, action, next_state, model=self.model), self.step_num)
 
         if self.render:
             self.env.self.render()
             
         if done:
             _log.info(f"step: {self.step_num}\tepisode complete")
-            agent = None
-            mdp = None
+            self.agent = None
+            self.mdp = None
 
             if self.record:
                 new_video_filename = f"{self.dump_dir}/exploration_{self.step_num}.mp4"
@@ -408,7 +415,7 @@ class MaxActionModel(nn.Module):
 
         self.state = next_state
 
-        if self.step_num > self.n_warm_up_steps:
+        if self.step_num >= self.n_warm_up_steps:
 
             train_at_end_of_episode = (self.model_train_freq is np.inf)
             time_to_update = ((self.step_num % self.model_train_freq) == 0)
@@ -417,13 +424,13 @@ class MaxActionModel(nn.Module):
             if (train_at_end_of_episode and done) or \
                 time_to_update or just_finished_warm_up:
 
-                model = self.fit_model(buffer=self.buffer, 
+                self.fit_model(buffer=self.buffer, 
                 n_epochs=self.exploring_model_epochs, 
                 step_num=self.step_num, mode='explore')
 
                 # discard old solution and MDP as models changed
-                mdp = None
-                agent = None
+                self.mdp = None
+                self.agent = None
 
             # time_to_evaluate = ((step_num % self.eval_freq) == 0)
             # if time_to_evaluate or just_finished_warm_up:
