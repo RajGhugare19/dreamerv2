@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import numpy as np
 
+print(1)
+
 class DiscreteActionModel(nn.Module):
     def __init__(
         self,
