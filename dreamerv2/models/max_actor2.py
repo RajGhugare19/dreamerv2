@@ -20,10 +20,6 @@ from MAX.imagination import Imagination
 # from sac import SAC
 from dreamerv2.models.sac_discrete import SAC
 
-# import gym
-# import envs
-# from MAX.wrappers import BoundedActionsEnv, RecordedEnv, NoisyEnv
-
 device=None
 
 def get_sizes_from_env(env):
@@ -257,7 +253,7 @@ class MaxActionModel(nn.Module):
         # probs = action[1].detach().data.cpu().numpy()
         # policy_value = torch.mean(agent.get_state_value(current_state)).item()
         # return action, probs, mdp, agent, policy_value
-        print(f"get_action: {current_state.shape=}")
+        # print(f"get_action: {current_state.shape=}")
         actions, log_pi, action_probs = self.agent.actor.get_action(current_state)
         qf1_values = self.agent.qf1(current_state.unsqueeze(1).repeat(self.policy_evaluation_batch_size, 1, 1))
         qf2_values = self.agent.qf2(current_state.unsqueeze(1).repeat(self.policy_evaluation_batch_size, 1, 1))
@@ -298,7 +294,7 @@ class MaxActionModel(nn.Module):
         ep_returns = []
         best_return, best_params = -np.inf, deepcopy(self.agent.state_dict())
         for ep_i in range(policy_episodes):
-            print(f"{ep_i} policy episode")
+            # print(f"{ep_i} policy episode")
             warm_up = True if ((ep_i < self.policy_warm_up_episodes) and fresh_agent) else False
             ep_return = self.agent.episode(env=self.mdp, warm_up=warm_up, verbosity=self.verbosity, _log=_log)
             ep_returns.append(ep_return)

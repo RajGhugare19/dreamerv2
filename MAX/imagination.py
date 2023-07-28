@@ -74,7 +74,7 @@ class Imagination:
     def reset(self):
         # states = torch.from_numpy(self.init_state).float()
         states = self.init_state.float()
-        print(f"{states.shape=}")
+        # print(f"{states.shape=}")
         # states = states.unsqueeze(0)
         states = states.repeat(self.n_actors, 1)
         states = states.to(self.model.device)
