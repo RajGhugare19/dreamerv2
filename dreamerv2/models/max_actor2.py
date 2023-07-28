@@ -128,6 +128,8 @@ class MaxActionModel(nn.Module):
         self.state = None
         self.init_max_exploration()
 
+        self.glob_agent_step = 0
+        
     def get_utility_measure(self):
         
         if self.utility_measure == 'cp_stdev':
@@ -230,7 +232,8 @@ class MaxActionModel(nn.Module):
                          alpha=self.policy_explore_alpha,
                          lr=self.policy_lr,
                          tau=self.policy_tau,
-                         env=self.mdp)
+                         env=self.mdp,
+                         glob_agent_step = self.glob_agent_step)
 
         self.agent = self.agent.to(device)
         self.agent.setup_normalizer(self.normalizer)
@@ -263,7 +266,7 @@ class MaxActionModel(nn.Module):
         # policy_value = torch.mean(agent.get_state_value(current_state)).item()
         # return action, probs, mdp, agent, policy_value
         # print(f"get_action: {current_state.shape=}")
-        actions, log_pi, action_probs = self.agent.actor.get_action(current_state)
+        actions, log_pi, action_probs = self.agent.act_in_env(current_state)
         qf1_values = self.agent.qf1(current_state.unsqueeze(1).repeat(self.policy_evaluation_batch_size, 1, 1))
         qf2_values = self.agent.qf2(current_state.unsqueeze(1).repeat(self.policy_evaluation_batch_size, 1, 1))
         policy_value = torch.min(qf1_values, qf2_values).mean(dim=0).squeeze()
@@ -293,7 +296,7 @@ class MaxActionModel(nn.Module):
 
         # reactive updates
         for update_idx in range(self.policy_reactive_updates):
-            self.agent.update()
+            self.glob_agent_step += self.agent.update()
 
         # active updates -- perform active exploration
         # to be fair to reactive methods, clear real env data in SAC buffer, to prevent further gradient updates from it.
@@ -395,12 +398,14 @@ class MaxActionModel(nn.Module):
 
             # _run.log_scalar("action_norm", np.sum(np.square(action)), step_num)
             # _run.log_scalar("exploration_policy_value", policy_value, step_num)
-            wandb.log({'max/action_norm': np.sum(np.square(action)),
-                       'max/exploration_policy_value': policy_value,},
+            # print(policy_value)
+            # print(action)
+            # print(action.shape)     # TODO
+            wandb.log({'max/exploration_policy_value': policy_value.detach(),},
                       step=self.step_num)
             
-            if self.action_noise_stdev: # = 0
-                action = action + np.random.normal(scale=self.action_noise_stdev, size=action.shape)
+            # if self.action_noise_stdev: # = 0
+            #     action = action + np.random.normal(scale=self.action_noise_stdev, size=action.shape)
         else:
             action = self.env.action_space.sample()
             probs = np.ones_like(action) / len(action)

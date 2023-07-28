@@ -13,13 +13,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-# from stable_baselines3.common.atari_wrappers import (
-#     ClipRewardEnv,
-#     EpisodicLifeEnv,
-#     FireResetEnv,
-#     MaxAndSkipEnv,
-#     NoopResetEnv,
-# )
 from stable_baselines3.common.buffers import ReplayBuffer
 from torch.distributions.categorical import Categorical
 # from torch.utils.tensorboard import SummaryWriter
@@ -271,7 +264,8 @@ class Actor(nn.Module):
 # if __name__ == "__main__":
 class SAC(nn.Module):
     def __init__(self, d_state, d_action, replay_size, \
-        batch_size, n_updates, n_hidden, gamma, alpha, lr, tau, env):
+        batch_size, n_updates, n_hidden, gamma, alpha, lr, tau, env,
+                glob_agent_step):
         super(SAC, self).__init__()
         """
         Here you can see some args pass. We are not using them.
@@ -279,20 +273,8 @@ class SAC(nn.Module):
         """
 
         self.args = parse_args()
-        self.run_name = f"{self.args.env_id}__{self.args.exp_name}__{self.args.seed}__{int(time.time())}"
+        # self.run_name = f"{self.args.env_id}__{self.args.exp_name}__{self.args.seed}__{int(time.time())}"
         
-        if self.args.track:
-            import wandb
-
-            # wandb.init(
-            #     project=self.args.wandb_project_name,
-            #     entity=self.args.wandb_entity,
-            #     sync_tensorboard=True,
-            #     config=vars(self.args),
-            #     name=self.run_name,
-            #     monitor_gym=True,
-            #     save_code=True,
-            # )
         # commented it!!!
         # self.writer = SummaryWriter(f"runs/{self.run_name}")
         # self.writer.add_text(
@@ -347,7 +329,9 @@ class SAC(nn.Module):
         self.global_episode_step = 0
         self.global_update_step = 0
         self.n_updates = n_updates
-
+        
+        self.glob_agent_step = glob_agent_step
+        
     def setup_normalizer(self, normalizer):
         self.normalizer = normalizer
         self.replay.setup_transition_normailizer(normalizer)
@@ -358,6 +342,11 @@ class SAC(nn.Module):
     #     pass
     #     # TODO !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
+    def act_in_env(self, state):
+        if self.normalizer is not None:
+            state = self.normalizer.normalize_states(state)
+        return self.actor.get_action(state)
+        
     def create_new_replay(self):
         return ReplayBufferwithTransitionNormalizer(
             buffer_size=self.replay_params['replay_size'],
@@ -386,7 +375,6 @@ class SAC(nn.Module):
                 actions = torch.from_numpy(actions)
                 # print(f'sample action {type(actions)} {actions.shape}')
             else:
-                print(f'agent tries to act in imagination {type(actions)} {actions.shape}')
                 with torch.enable_grad():
                     actions, _, _ = self.actor.get_action(torch.Tensor(obs).to(self.device))
                 # actions = actions.detach().cpu().numpy()
@@ -394,17 +382,6 @@ class SAC(nn.Module):
             # TRY NOT TO MODIFY: execute the game and log data.
             next_obs, rewards, dones, infos = env.step(actions) #envs.step(actions)
             # print(f"{obs.shape=}, {next_obs.shape=}, {actions.shape=}, {rewards=}, {dones=}, {infos=}")
-
-            # TRY NOT TO MODIFY: record rewards for plotting purposes
-            for info in infos:
-                if "episode" in info.keys():
-                    print(f"global_episode_step={self.global_episode_step}, episodic_return={info['episode']['r']}")
-                    wandb.log({"charts/episodic_return": info["episode"]["r"]}, step=self.global_episode_step)
-                    wandb.log({"charts/episodic_length": info["episode"]["l"]}, step=self.global_episode_step)
-                    
-                    # self.writer.add_scalar("charts/episodic_return", info["episode"]["r"], self.global_episode_step)
-                    # self.writer.add_scalar("charts/episodic_length", info["episode"]["l"], self.global_episode_step)
-                    break
 
             # TRY NOT TO MODIFY: save data to reply buffer; handle `terminal_observation`
             # real_next_obs = next_obs.copy()
@@ -451,14 +428,17 @@ class SAC(nn.Module):
             qf2_values = self.qf2(data.observations)
             qf1_a_values = qf1_values.squeeze().gather(1, data.actions.argmax(1).unsqueeze(1).long()).view(-1)
             qf2_a_values = qf2_values.squeeze().gather(1, data.actions.argmax(1).unsqueeze(1).long()).view(-1)
-            # print(f"{qf2_values.shape=} {data.actions.shape=}")
-            # print(f"{qf2_a_values.shape=} {next_q_value.shape=}")
             qf1_loss = F.mse_loss(qf1_a_values, next_q_value)
             qf2_loss = F.mse_loss(qf2_a_values, next_q_value)
             qf_loss = qf1_loss + qf2_loss
-
+        
         self.q_optimizer.zero_grad()
         qf_loss.backward()
+
+        clip = 5.
+        torch.nn.utils.clip_grad_norm_(self.qf1.parameters(), clip)
+        torch.nn.utils.clip_grad_norm_(self.qf2.parameters(), clip)
+        
         self.q_optimizer.step()
 
         # ACTOR training
@@ -496,17 +476,6 @@ class SAC(nn.Module):
             target_param.data.copy_(self.args.tau * param.data + (1 - self.args.tau) * target_param.data)
 
         if self.global_update_step % 100 == 0:
-            # self.writer.add_scalar("losses/qf1_values", qf1_a_values.mean().item(), self.global_update_step)
-            # self.writer.add_scalar("losses/qf2_values", qf2_a_values.mean().item(), self.global_update_step)
-            # self.writer.add_scalar("losses/qf1_loss", qf1_loss.item(), self.global_update_step)
-            # self.writer.add_scalar("losses/qf2_loss", qf2_loss.item(), self.global_update_step)
-            # self.writer.add_scalar("losses/qf_loss", qf_loss.item() / 2.0, self.global_update_step)
-            # self.writer.add_scalar("losses/actor_loss", actor_loss.item(), self.global_update_step)
-            # self.writer.add_scalar("losses/alpha", self.alpha, self.global_update_step)
-            # log.info("SPS:", int(self.global_update_step / (time.time() - self.start_time)))
-            # self.writer.add_scalar("charts/SPS", int(self.global_update_step / (time.time() - self.start_time)), self.global_update_step)
-            # if self.args.autotune:
-            #     self.writer.add_scalar("losses/alpha_loss", alpha_loss.item(), self.global_update_step)
 
             wandb.log({"sac_losses/qf1_values": qf1_a_values.mean().item(),
                        "sac_losses/qf2_values": qf2_a_values.mean().item(),
@@ -514,13 +483,17 @@ class SAC(nn.Module):
                        "sac_losses/qf2_loss": qf2_loss.item(),
                        "sac_losses/qf_loss": qf_loss.item() / 2.0,
                        "sac_losses/actor_loss": actor_loss.item(),
-                       "sac_losses/alpha": self.alpha}, step=self.global_update_step)
+                       "sac_losses/alpha": self.alpha}, step=self.glob_agent_step)
                        
             log.info("SPS:", int(self.global_update_step / (time.time() - self.start_time)))
             
             wandb.log({"charts/SPS": int(self.global_update_step / (time.time() - self.start_time))},
-                      step=self.global_update_step)
+                      step=self.glob_agent_step)
             if self.args.autotune:
-                wandb.log({"sac_losses/alpha_loss": alpha_loss.item()}, step=self.global_update_step)
+                wandb.log({"sac_losses/alpha_loss": alpha_loss.item()}, step=self.glob_agent_step)
                 
         self.global_update_step += 1
+        self.glob_agent_step += 1
+        
+        return self.global_update_step
+        

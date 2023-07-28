@@ -34,7 +34,7 @@ def init_wandb(dreamer_args, minatar_args_dict, sac_args, max_args=None):
 
     wandb.init(
         project='dreamermax',
-        name='kate_experiments_with_configs',
+        name='kate2_experiments_with_configs',
         sync_tensorboard=False,
         config=config,
         monitor_gym=True,
@@ -44,6 +44,10 @@ def init_wandb(dreamer_args, minatar_args_dict, sac_args, max_args=None):
 def main(args):
     # wandb.login()
 
+#     wandb.define_metric('sac_step')
+#     wandb.define_metric('max_step')
+#     wandb.define_metric('dream_step')
+    
     env_name = args.env
     exp_id = args.id + '_pomdp'
 
@@ -142,6 +146,7 @@ def main(args):
 
         if done:
             train_episodes += 1
+            print(train_episodes)
             # trainer.buffer.add(obs, action.squeeze(0).cpu().numpy(), rew, done)
             trainer.buffer.add(obs, action, rew, done)
             train_metrics['train_rewards'] = score
