@@ -31,7 +31,7 @@ log = logging.getLogger(__name__)
 def parse_args():
     # fmt: off
     parser = argparse.ArgumentParser()
-    parser.add_argument("--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"),
+    parser.add_argument("--exp-name", type=str, default='breakout',
         help="the name of this experiment")
     parser.add_argument("--seed", type=int, default=1, 
         help="seed of the experiment")

@@ -34,8 +34,8 @@ def init_wandb(dreamer_args, minatar_args_dict, sac_args, max_args=None):
 
     wandb.init(
         project='dreamermax',
-        name='experiments_with_configs',
-        sync_tensorboard=True,
+        name='kate_experiments_with_configs',
+        sync_tensorboard=False,
         config=config,
         monitor_gym=True,
         # save_code=True,
