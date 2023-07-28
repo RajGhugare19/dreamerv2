@@ -21,6 +21,8 @@ from MAX.imagination import Imagination
 # from sac import SAC
 from dreamerv2.models.sac_discrete import SAC
 
+import logging
+
 device=None
 
 def get_sizes_from_env(env):
@@ -117,6 +119,7 @@ class MaxActionModel(nn.Module):
 
         self.utility = self.get_utility_measure()
 
+        self._log = logging.getLogger(__name__)
         self.env = env
         self.buffer = None
         self.exploration_measure = self.utility
@@ -189,23 +192,23 @@ class MaxActionModel(nn.Module):
             self.optimizer.step()
         return np.mean(losses)
 
-    def fit_model(self, buffer, n_epochs, step_num, mode, _log=None, _run=None):
+    def fit_model(self, buffer, n_epochs, step_num, mode, _run=None):
             
         self.model = self._build_model()
         self.model.setup_normalizer(self.normalizer)
         self.optimizer = torch.optim.Adam(self.model.parameters(), 
             lr=self.learning_rate, weight_decay=self.weight_decay)
 
-        if self.verbosity and _log:
-            _log.info(f"step: {step_num}\t training")
+        if self.verbosity and self._log:
+            self._log.info(f"step: {step_num}\t training")
         
         tr_loss_list = []
         for epoch_i in range(1, n_epochs + 1):
             tr_loss = self.train_epoch()
             tr_loss_list.append(tr_loss)
 
-        if self.verbosity and _log:
-            _log.info(f"step: {step_num}\t training done for {n_epochs} epochs, final loss: {np.round(tr_loss, 3)}")
+        if self.verbosity and self._log:
+            self._log.info(f"step: {step_num}\t training done for {n_epochs} epochs, final loss: {np.round(tr_loss, 3)}")
             
         wandb.log({'max/mean_trloss': np.mean(tr_loss_list)}, step=step_num)
         wandb.log({'max/mean_final_tr_loss': tr_loss}, step=step_num)
@@ -214,10 +217,10 @@ class MaxActionModel(nn.Module):
     """
     Planning
     """
-    def get_policy(self, _log=None):
+    def get_policy(self):
 
-        if self.verbosity and _log:
-            _log.info("... getting fresh agent")
+        if self.verbosity and self._log:
+            self._log.info("... getting fresh agent")
 
         size = len(self.buffer)
         self.agent = SAC(d_state=self.d_state,
@@ -238,8 +241,8 @@ class MaxActionModel(nn.Module):
         if not self.buffer_reuse:
             return self.agent
 
-        if self.verbosity and _log:
-            _log.info("... transferring exploration buffer")
+        if self.verbosity and self._log:
+            self._log.info("... transferring exploration buffer")
 
         for i in range(0, size, 1024):
  
@@ -269,7 +272,7 @@ class MaxActionModel(nn.Module):
         policy_value = torch.min(qf1_values, qf2_values).mean(dim=0).squeeze()
         return actions, action_probs, self.mdp, self.agent, policy_value
 
-    def act(self, mode='explore', _run=None, _log=None):
+    def act(self, mode='explore', _run=None):
         policy_horizon = self.policy_explore_horizon
         policy_episodes = self.policy_explore_episodes
 
@@ -304,7 +307,7 @@ class MaxActionModel(nn.Module):
         best_return, best_params = -np.inf, deepcopy(self.agent.state_dict())
         for ep_i in range(policy_episodes):
             warm_up = True if ((ep_i < self.policy_warm_up_episodes) and fresh_agent) else False
-            ep_return = self.agent.episode(env=self.mdp, warm_up=warm_up, verbosity=self.verbosity, _log=_log)
+            ep_return = self.agent.episode(env=self.mdp, warm_up=warm_up, verbosity=self.verbosity)
             ep_returns.append(ep_return)
 
             if self.use_best_policy and ep_return > best_return:
@@ -313,8 +316,8 @@ class MaxActionModel(nn.Module):
             if self.verbosity:
                 step_return = ep_return / policy_horizon
                 wandb.log({'max/step_return': np.round(step_return, 3)}, step=ep_i)  # TODO: wnadb?
-                # if _log:
-                    # _log.info(f"\tep: {ep_i}\taverage step return: {np.round(step_return, 3)}")
+                if self._log:
+                    self._log.info(f"\tep: {ep_i}\taverage step return: {np.round(step_return, 3)}")
                 
         if self.use_best_policy:
             self.agent.load_state_dict(best_params)
@@ -386,7 +389,7 @@ class MaxActionModel(nn.Module):
         self.state = self.env.reset()
         self.step_num = 1
 
-    def do_max_exploration(self, _log=None, _run=None) -> None:
+    def do_max_exploration(self, _run=None) -> None:
         self.step_num += 1
         if self.step_num > self.n_warm_up_steps:
             action, probs, mdp, agent, policy_value = self.act(mode='explore')
@@ -422,8 +425,8 @@ class MaxActionModel(nn.Module):
         #     self.env.self.render()
             
         if done:
-            if _log:
-                _log.info(f"step: {self.step_num}\tepisode complete")
+            if self._log:
+                self._log.info(f"step: {self.step_num}\tepisode complete")
             self.agent = None
             self.mdp = None
 
