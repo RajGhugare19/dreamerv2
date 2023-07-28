@@ -220,10 +220,17 @@ class MaxActionModel(nn.Module):
             _log.info("... getting fresh agent")
 
         size = len(self.buffer)
-
-        self.agent = SAC(d_state=self.d_state, d_action=self.d_action, replay_size=self.policy_replay_size, 
-            batch_size=self.policy_batch_size, n_updates=self.policy_active_updates, n_hidden=self.policy_n_hidden, 
-            gamma=self.policy_gamma, alpha=self.policy_explore_alpha, lr=self.policy_lr, tau=self.policy_tau, env=self.mdp)
+        self.agent = SAC(d_state=self.d_state,
+                         d_action=self.d_action,
+                         replay_size=self.policy_replay_size,
+                         batch_size=self.policy_batch_size,
+                         n_updates=self.policy_active_updates,
+                         n_hidden=self.policy_n_hidden,
+                         gamma=self.policy_gamma,
+                         alpha=self.policy_explore_alpha,
+                         lr=self.policy_lr,
+                         tau=self.policy_tau,
+                         env=self.mdp)
 
         self.agent = self.agent.to(device)
         self.agent.setup_normalizer(self.normalizer)

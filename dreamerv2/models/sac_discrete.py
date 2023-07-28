@@ -5,6 +5,7 @@ import random
 import time
 from distutils.util import strtobool
 
+import wandb
 import gym
 from gym import spaces
 import numpy as np
@@ -21,7 +22,7 @@ import torch.optim as optim
 # )
 from stable_baselines3.common.buffers import ReplayBuffer
 from torch.distributions.categorical import Categorical
-from torch.utils.tensorboard import SummaryWriter
+# from torch.utils.tensorboard import SummaryWriter
 from typing import Union
 
 import logging
@@ -292,12 +293,12 @@ class SAC(nn.Module):
             #     monitor_gym=True,
             #     save_code=True,
             # )
-
-        self.writer = SummaryWriter(f"runs/{self.run_name}")
-        self.writer.add_text(
-            "hyperparameters",
-            "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(self.args).items()])),
-        )
+        # commented it!!!
+        # self.writer = SummaryWriter(f"runs/{self.run_name}")
+        # self.writer.add_text(
+        #     "hyperparameters",
+        #     "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(self.args).items()])),
+        # )
 
         # # TRY NOT TO MODIFY: seeding
         # random.seed(self.args.seed)
@@ -398,8 +399,11 @@ class SAC(nn.Module):
             for info in infos:
                 if "episode" in info.keys():
                     print(f"global_episode_step={self.global_episode_step}, episodic_return={info['episode']['r']}")
-                    self.writer.add_scalar("charts/episodic_return", info["episode"]["r"], self.global_episode_step)
-                    self.writer.add_scalar("charts/episodic_length", info["episode"]["l"], self.global_episode_step)
+                    wandb.log({"charts/episodic_return": info["episode"]["r"]}, step=self.global_episode_step)
+                    wandb.log({"charts/episodic_length": info["episode"]["l"]}, step=self.global_episode_step)
+                    
+                    # self.writer.add_scalar("charts/episodic_return", info["episode"]["r"], self.global_episode_step)
+                    # self.writer.add_scalar("charts/episodic_length", info["episode"]["l"], self.global_episode_step)
                     break
 
             # TRY NOT TO MODIFY: save data to reply buffer; handle `terminal_observation`
@@ -492,16 +496,31 @@ class SAC(nn.Module):
             target_param.data.copy_(self.args.tau * param.data + (1 - self.args.tau) * target_param.data)
 
         if self.global_update_step % 100 == 0:
-            self.writer.add_scalar("losses/qf1_values", qf1_a_values.mean().item(), self.global_update_step)
-            self.writer.add_scalar("losses/qf2_values", qf2_a_values.mean().item(), self.global_update_step)
-            self.writer.add_scalar("losses/qf1_loss", qf1_loss.item(), self.global_update_step)
-            self.writer.add_scalar("losses/qf2_loss", qf2_loss.item(), self.global_update_step)
-            self.writer.add_scalar("losses/qf_loss", qf_loss.item() / 2.0, self.global_update_step)
-            self.writer.add_scalar("losses/actor_loss", actor_loss.item(), self.global_update_step)
-            self.writer.add_scalar("losses/alpha", self.alpha, self.global_update_step)
+            # self.writer.add_scalar("losses/qf1_values", qf1_a_values.mean().item(), self.global_update_step)
+            # self.writer.add_scalar("losses/qf2_values", qf2_a_values.mean().item(), self.global_update_step)
+            # self.writer.add_scalar("losses/qf1_loss", qf1_loss.item(), self.global_update_step)
+            # self.writer.add_scalar("losses/qf2_loss", qf2_loss.item(), self.global_update_step)
+            # self.writer.add_scalar("losses/qf_loss", qf_loss.item() / 2.0, self.global_update_step)
+            # self.writer.add_scalar("losses/actor_loss", actor_loss.item(), self.global_update_step)
+            # self.writer.add_scalar("losses/alpha", self.alpha, self.global_update_step)
+            # log.info("SPS:", int(self.global_update_step / (time.time() - self.start_time)))
+            # self.writer.add_scalar("charts/SPS", int(self.global_update_step / (time.time() - self.start_time)), self.global_update_step)
+            # if self.args.autotune:
+            #     self.writer.add_scalar("losses/alpha_loss", alpha_loss.item(), self.global_update_step)
+
+            wandb.log({"sac_losses/qf1_values": qf1_a_values.mean().item(),
+                       "sac_losses/qf2_values": qf2_a_values.mean().item(),
+                       "sac_losses/qf1_loss": qf1_loss.item(), 
+                       "sac_losses/qf2_loss": qf2_loss.item(),
+                       "sac_losses/qf_loss": qf_loss.item() / 2.0,
+                       "sac_losses/actor_loss": actor_loss.item(),
+                       "sac_losses/alpha": self.alpha}, step=self.global_update_step)
+                       
             log.info("SPS:", int(self.global_update_step / (time.time() - self.start_time)))
-            self.writer.add_scalar("charts/SPS", int(self.global_update_step / (time.time() - self.start_time)), self.global_update_step)
+            
+            wandb.log({"charts/SPS": int(self.global_update_step / (time.time() - self.start_time))},
+                      step=self.global_update_step)
             if self.args.autotune:
-                self.writer.add_scalar("losses/alpha_loss", alpha_loss.item(), self.global_update_step)
-        
+                wandb.log({"sac_losses/alpha_loss": alpha_loss.item()}, step=self.global_update_step)
+                
         self.global_update_step += 1
