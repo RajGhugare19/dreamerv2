@@ -422,15 +422,15 @@ class SAC(nn.Module):
             next_q_value = data.rewards.flatten() + (1 - data.dones.flatten()) * self.args.gamma * (min_qf_next_target)
                             #[64, 1]                   [64, 1]                                         [64, 3 ]
 
-        with torch.enable_grad():
-            # use Q-values only for the taken actions
-            qf1_values = self.qf1(data.observations)
-            qf2_values = self.qf2(data.observations)
-            qf1_a_values = qf1_values.squeeze().gather(1, data.actions.argmax(1).unsqueeze(1).long()).view(-1)
-            qf2_a_values = qf2_values.squeeze().gather(1, data.actions.argmax(1).unsqueeze(1).long()).view(-1)
-            qf1_loss = F.mse_loss(qf1_a_values, next_q_value)
-            qf2_loss = F.mse_loss(qf2_a_values, next_q_value)
-            qf_loss = qf1_loss + qf2_loss
+        # with torch.enable_grad():
+        # use Q-values only for the taken actions
+        qf1_values = self.qf1(data.observations)
+        qf2_values = self.qf2(data.observations)
+        qf1_a_values = qf1_values.squeeze().gather(1, data.actions.argmax(1).unsqueeze(1).long()).view(-1)
+        qf2_a_values = qf2_values.squeeze().gather(1, data.actions.argmax(1).unsqueeze(1).long()).view(-1)
+        qf1_loss = F.mse_loss(qf1_a_values, next_q_value)
+        qf2_loss = F.mse_loss(qf2_a_values, next_q_value)
+        qf_loss = qf1_loss + qf2_loss
         
         self.q_optimizer.zero_grad()
         qf_loss.backward()
@@ -442,26 +442,26 @@ class SAC(nn.Module):
         self.q_optimizer.step()
 
         # ACTOR training
-        with torch.enable_grad():
-            _, log_pi, action_probs = self.actor.get_action(data.observations)
+        # with torch.enable_grad():
+        _, log_pi, action_probs = self.actor.get_action(data.observations)
     
         with torch.no_grad():
             qf1_values = self.qf1(data.observations)
             qf2_values = self.qf2(data.observations)
             min_qf_values = torch.min(qf1_values, qf2_values)
         
-        with torch.enable_grad():
-            # no need for reparameterization, the expectation can be calculated for discrete actions
-            actor_loss = (action_probs * ((self.alpha * log_pi) - min_qf_values)).mean()
+        # with torch.enable_grad():
+        # no need for reparameterization, the expectation can be calculated for discrete actions
+        actor_loss = (action_probs * ((self.alpha * log_pi) - min_qf_values)).mean()
 
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
         self.actor_optimizer.step()
 
         if self.args.autotune:
-            with torch.enable_grad():
-                # re-use action probabilities for temperature loss
-                alpha_loss = (action_probs.detach() * (-self.log_alpha * (log_pi + self.target_entropy).detach())).mean()
+            # with torch.enable_grad():
+            # re-use action probabilities for temperature loss
+            alpha_loss = (action_probs.detach() * (-self.log_alpha * (log_pi + self.target_entropy).detach())).mean()
 
             self.a_optimizer.zero_grad()
             alpha_loss.backward()
@@ -496,4 +496,3 @@ class SAC(nn.Module):
         self.glob_agent_step += 1
         
         return self.global_update_step
-        

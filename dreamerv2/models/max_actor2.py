@@ -155,7 +155,7 @@ class MaxActionModel(nn.Module):
             raise Exception('invalid utility measure')
         
     def forward(self):
-        action, action_dist = self.do_max_exploration(None, None)
+        action, action_dist = self.do_max_exploration(None)
         return action, action_dist
 
     def get_action_dist(self, modelstate):
@@ -185,9 +185,9 @@ class MaxActionModel(nn.Module):
             self.buffer.train_batches(batch_size=self.batch_size):
 
             self.optimizer.zero_grad()
-            with torch.enable_grad():
-                loss = self.model.loss(tr_states, tr_actions, tr_state_deltas, 
-                    training_noise_stdev=self.training_noise_stdev)
+            # with torch.enable_grad():
+            loss = self.model.loss(tr_states, tr_actions, tr_state_deltas, 
+                training_noise_stdev=self.training_noise_stdev)
             losses.append(loss.item())
             loss.backward()
             torch.nn.utils.clip_grad_value_(self.model.parameters(), self.grad_clip)
@@ -259,7 +259,10 @@ class MaxActionModel(nn.Module):
  
             r = self.utility(s, a, ns, mu, var, self.model)
             self.agent.replay.add_batch(s, ns, a, r, np.zeros(0), [{}])
-        
+            # s : [size, state_size], r : [size]
+            wandb.log({'max/utility_mean' : r.mean(),
+                       'max/utility_min' : r.min(),
+                       'max/utility_max' : r.max()})
 
     def get_action(self):
         current_state = self.mdp.reset()

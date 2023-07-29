@@ -34,7 +34,7 @@ def init_wandb(dreamer_args, minatar_args_dict, sac_args, max_args=None):
 
     wandb.init(
         project='dreamermax',
-        name='kate2_experiments_with_configs',
+        name='FIXED_MODEL',
         sync_tensorboard=False,
         config=config,
         monitor_gym=True,
@@ -126,19 +126,20 @@ def main(args):
             _, posterior_rssm_state = trainer.RSSM.rssm_observe(embed, prev_action, not done, prev_rssmstate)
             model_state = trainer.RSSM.get_model_state(posterior_rssm_state)
             
-            ### !11111111111111111111111111111111111111111111111111111
-            if False: #iter < 10**5:
-                action, action_dist = trainer.ActionModel(model_state)
-                action = trainer.ActionModel.add_exploration(action, iter).detach()
-                action_ent = torch.mean(action_dist.entropy()).item()
-                episode_actor_ent.append(action_ent)
-            else:
-                action, action_probs = maxtrainer()
-                # print(f"{action_probs}")
-                action_dist = torch.distributions.OneHotCategorical(probs=action_probs)
-                action_ent = torch.mean(action_dist.entropy()).item()
-                episode_actor_ent.append(action_ent)
-            ### !11111111111111111111111111111111111111111111111111111
+            # ### !11111111111111111111111111111111111111111111111111111
+            # if False: #iter < 10**5:
+            #     action, action_dist = trainer.ActionModel(model_state)
+            #     action = trainer.ActionModel.add_exploration(action, iter).detach()
+            #     action_ent = torch.mean(action_dist.entropy()).item()
+            #     episode_actor_ent.append(action_ent)
+            # else:
+
+        action, action_probs = maxtrainer()
+        # print(f"{action_probs}")
+        action_dist = torch.distributions.OneHotCategorical(probs=action_probs)
+        action_ent = torch.mean(action_dist.entropy()).item()
+        episode_actor_ent.append(action_ent)
+        ### !11111111111111111111111111111111111111111111111111111
             
         # next_obs, rew, done, _ = env.step(action.squeeze(0).cpu().numpy())
         next_obs, rew, done, _ = env.step(action) #.cpu().numpy())
